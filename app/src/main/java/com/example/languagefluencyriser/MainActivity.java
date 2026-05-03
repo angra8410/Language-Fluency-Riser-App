@@ -15,6 +15,7 @@ import android.os.Looper;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -110,7 +111,9 @@ public class MainActivity extends Activity {
     private Button micButton;
     private Button largeMicButton;
     private TextView speakingHint;
+    private TextView immersionHint;
     private SpeechRecognizer speechRecognizer;
+    private TextToSpeech tts;
     private ProgressBar progressBar;
     private TextView[] stepViews;
     private static final String[] STEPS = {"Opening", "Recall", "Drill", "Error Fix", "Closing"};
@@ -123,12 +126,31 @@ public class MainActivity extends Activity {
         buildUi();
         loadPrefs();
         updateStepIndicator(-1);
+        initTts();
         appendSystem("Configure your session and tap 'Begin New Session' to start.");
+    }
+
+    private void initTts() {
+        tts = new TextToSpeech(this, status -> {
+            if (status != TextToSpeech.SUCCESS) {
+                appendSystem("TTS Initialization failed.");
+                tts = null;
+            } else {
+                tts.setLanguage(Locale.US);
+            }
+        });
     }
 
     @Override
     protected void onDestroy() {
         executor.shutdownNow();
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+        }
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+        }
         super.onDestroy();
     }
 
@@ -461,6 +483,15 @@ public class MainActivity extends Activity {
         speakingHint.setVisibility(View.GONE);
         inputPanel.addView(speakingHint);
 
+        immersionHint = new TextView(this);
+        immersionHint.setText("Reading practice. Use the 'Listen' button for TTS.");
+        immersionHint.setTextColor(Color.rgb(39, 174, 96));
+        immersionHint.setTextSize(13);
+        immersionHint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        immersionHint.setPadding(dp(4), 0, 0, dp(8));
+        immersionHint.setVisibility(View.GONE);
+        inputPanel.addView(immersionHint);
+
         userInput = multiLineField("Share your thoughts or complete the task...");
         inputPanel.addView(userInput);
 
@@ -502,25 +533,25 @@ public class MainActivity extends Activity {
                     autoFocusInfo.setVisibility(View.GONE);
                 }
                 
-                // Writing Studio UI enhancements
+                // Reset all specific UI elements first
+                writingHelper.setVisibility(View.GONE);
+                speakingHint.setVisibility(View.GONE);
+                immersionHint.setVisibility(View.GONE);
+                largeMicButton.setVisibility(View.GONE);
+                userInput.setMinLines(4);
+                inputPanel.setPadding(dp(20), dp(20), dp(20), dp(20));
+
                 if ("Writing Studio".equals(effective)) {
                     writingHelper.setVisibility(View.VISIBLE);
                     userInput.setMinLines(8);
                     inputPanel.setPadding(dp(20), dp(24), dp(20), dp(24));
-                } else {
-                    writingHelper.setVisibility(View.GONE);
-                    userInput.setMinLines(4);
-                    inputPanel.setPadding(dp(20), dp(20), dp(20), dp(20));
-                }
-                
-                // Speaking Lab UI enhancements
-                if ("Speaking Lab".equals(effective)) {
+                } else if ("Speaking Lab".equals(effective)) {
                     speakingHint.setVisibility(View.VISIBLE);
                     largeMicButton.setVisibility(View.VISIBLE);
                     micButton.setVisibility(View.GONE);
-                } else {
-                    speakingHint.setVisibility(View.GONE);
-                    largeMicButton.setVisibility(View.GONE);
+                } else if ("Input Immersion".equals(effective)) {
+                    immersionHint.setVisibility(View.VISIBLE);
+                    userInput.setMinLines(2); // Less space needed for responses usually
                 }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
@@ -1194,6 +1225,13 @@ public class MainActivity extends Activity {
             drawable.setColor(Color.TRANSPARENT);
             speakerView.setTextColor(Color.rgb(113, 128, 150));
             speakerView.setText("NOTIFICATION");
+        } else if ("Input Immersion".equals(speaker)) {
+            drawable.setColor(Color.WHITE);
+            drawable.setStroke(dp(2), Color.rgb(34, 197, 94));
+            speakerView.setTextColor(Color.rgb(21, 128, 61));
+            speakerView.setText("📖 READING IMMERSION");
+            speakerView.setGravity(Gravity.CENTER);
+            card.setPadding(dp(24), dp(24), dp(24), dp(24));
         } else {
             drawable.setColor(Color.WHITE);
             drawable.setStroke(dp(1), Color.rgb(238, 242, 247));
@@ -1208,12 +1246,36 @@ public class MainActivity extends Activity {
         TextView contentView = new TextView(this);
         contentView.setText(text.trim());
         contentView.setTextColor(Color.rgb(26, 32, 44));
-        contentView.setTextSize(16);
-        contentView.setLineSpacing(dp(2), 1.1f);
+        if ("Input Immersion".equals(speaker)) {
+            contentView.setTextSize(20);
+            contentView.setTypeface(Typeface.SERIF);
+            contentView.setLineSpacing(dp(4), 1.2f);
+        } else {
+            contentView.setTextSize(16);
+            contentView.setLineSpacing(dp(2), 1.15f);
+        }
         contentView.setTextIsSelectable(true);
         
         card.addView(speakerView);
         card.addView(contentView);
+        
+        if ("Input Immersion".equals(speaker)) {
+            Button listenButton = secondaryButton("🔊 Listen to Content");
+            if (tts == null) {
+                listenButton.setEnabled(false);
+                listenButton.setAlpha(0.6f);
+                listenButton.setText("🔊 TTS Initializing...");
+            }
+            listenButton.setOnClickListener(v -> {
+                if (tts != null) {
+                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "immersion");
+                }
+            });
+            LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+            btnParams.setMargins(0, dp(24), 0, 0);
+            card.addView(listenButton, btnParams);
+        }
         
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1230,6 +1292,8 @@ public class MainActivity extends Activity {
             contentView.setTextSize(13);
             contentView.setTextColor(Color.rgb(113, 128, 150));
             contentView.setTypeface(Typeface.create("sans-serif", Typeface.ITALIC));
+        } else if ("Input Immersion".equals(speaker)) {
+            params.setMargins(0, dp(8), 0, dp(24));
         } else {
             params.setMargins(0, 0, dp(32), dp(16));
         }
