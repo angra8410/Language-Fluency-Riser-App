@@ -440,6 +440,16 @@ public class MainActivity extends Activity {
         content.addView(sectionHeader("✍️ Your Response"));
         LinearLayout inputPanel = panel();
         content.addView(inputPanel);
+        
+        TextView writingHelper = new TextView(this);
+        writingHelper.setText("Write your response below.");
+        writingHelper.setTextColor(Color.rgb(63, 81, 181));
+        writingHelper.setTextSize(13);
+        writingHelper.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        writingHelper.setPadding(dp(4), 0, 0, dp(8));
+        writingHelper.setVisibility(View.GONE);
+        inputPanel.addView(writingHelper);
+
         userInput = multiLineField("Share your thoughts or complete the task...");
         inputPanel.addView(userInput);
 
@@ -450,6 +460,34 @@ public class MainActivity extends Activity {
         inputActions.addView(micButton, weightParams());
         inputActions.addView(sendButton, weightParams());
         inputPanel.addView(inputActions);
+
+        // Update Focus Spinner listener to handle Writing Studio UI
+        focusSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                String selected = String.valueOf(focusSpinner.getSelectedItem());
+                String effective = "Auto".equals(selected) ? roleForToday() : selected;
+                
+                if ("Auto".equals(selected)) {
+                    autoFocusInfo.setText("Auto selected: " + effective);
+                    autoFocusInfo.setVisibility(View.VISIBLE);
+                } else {
+                    autoFocusInfo.setVisibility(View.GONE);
+                }
+                
+                // Writing Studio UI enhancements
+                if ("Writing Studio".equals(effective)) {
+                    writingHelper.setVisibility(View.VISIBLE);
+                    userInput.setMinLines(8);
+                    inputPanel.setPadding(dp(20), dp(24), dp(20), dp(24));
+                } else {
+                    writingHelper.setVisibility(View.GONE);
+                    userInput.setMinLines(4);
+                    inputPanel.setPadding(dp(20), dp(20), dp(20), dp(20));
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
 
         // Secondary Actions - Tucked away but accessible
         LinearLayout secondaryActions = horizontal();
