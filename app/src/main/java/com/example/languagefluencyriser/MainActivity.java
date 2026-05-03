@@ -61,6 +61,26 @@ public class MainActivity extends Activity {
     private static final String DEFAULT_MODEL = "gemma3:12b";
     private static final String EMULATOR_HOST = "10.0.2.2";
     private static final int MAX_MEMORY_CHARS = 5000;
+    private static final String CONCISE_COACH_SYSTEM_PROMPT = 
+            "You are a concise English speaking coach inside a mobile app.\n\n"
+            + "Rules:\n"
+            + "- Keep responses short.\n"
+            + "- Do not explain your plan.\n"
+            + "- Do not reveal lesson planning.\n"
+            + "- Do not write headings like Plan, Priority Focus, Difficulty, Task Order, or First Task.\n"
+            + "- Ask only one question at a time.\n"
+            + "- Give feedback only after the learner answers.\n"
+            + "- Maximum response length: 60 words.\n"
+            + "- Use a friendly, supportive tone.\n\n"
+            + "For session openings:\n"
+            + "Return only:\n"
+            + "1. One short warm-up sentence.\n"
+            + "2. One speaking prompt.\n\n"
+            + "For feedback:\n"
+            + "Return only:\n"
+            + "1. One correction.\n"
+            + "2. One natural version.\n"
+            + "3. One next question.";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -778,6 +798,13 @@ public class MainActivity extends Activity {
         payload.put("stream", false);
         payload.put("messages", messages);
 
+        JSONObject options = new JSONObject();
+        options.put("temperature", 0.4);
+        options.put("top_p", 0.8);
+        options.put("repeat_penalty", 1.15);
+        options.put("num_predict", 90);
+        payload.put("options", options);
+
         try (OutputStream output = connection.getOutputStream();
              BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
             writer.write(payload.toString());
@@ -801,10 +828,9 @@ public class MainActivity extends Activity {
     }
 
     private String systemPromptForStep(String step) {
-        return "You are a local English fluency coach for a Spanish-speaking learner moving from B2 to C1.\n"
-                + "Use the learner memory below, but do not invent hidden facts. Keep answers practical and concise.\n"
+        return CONCISE_COACH_SYSTEM_PROMPT + "\n\n"
+                + "You are currently coaching a Spanish-speaking learner moving from B2 to C1.\n"
                 + "Use English as the default language. Use Spanish only when it prevents confusion.\n"
-                + "Always adapt difficulty using these rules: recurring weakness means more practice; scores above 85 increase difficulty; scores below 60 simplify; weak fluency means speaking pressure; weak accuracy means controlled correction.\n"
                 + "Current chain step: " + step + "\n\n"
                 + roleInstructions(step)
                 + "\n\nMemory JSON files:\n" + readMemoryBlock();
@@ -813,21 +839,21 @@ public class MainActivity extends Activity {
     private String roleInstructions(String step) {
         switch (step) {
             case "Supervisor Opening":
-                return "Act as Supervisor GPT. Inspect the memory, choose today's priorities, order, difficulty, and first task. Output a short plan plus the exact first instruction.";
+                return "Act as Supervisor GPT. Choose today's priorities and start the session immediately.";
             case "Supervisor Closing":
-                return "Act as Supervisor GPT closing step. Consolidate progress, name the next priority, and output a compact memory_update JSON with learner_profile, progress_tracker, and review_queue suggestions.";
+                return "Act as Supervisor GPT closing step. Consolidate progress and output a compact memory_update JSON.";
             case "Recall & Drill":
-                return "Act as Recall & Drill GPT. Run retrieval practice from the review queue and recurring errors. Ask one item at a time unless the learner asks otherwise.";
+                return "Act as Recall & Drill GPT. Run retrieval practice. Ask one item at a time.";
             case "Speaking Lab":
-                return "Act as Speaking Lab GPT. Create speaking practice under pressure with natural phrasing, interruptions, spontaneity, and C1-level reformulations.";
+                return "Act as Speaking Lab GPT. Create speaking practice under pressure with C1-level reformulations.";
             case "Writing Studio":
-                return "Act as Writing Studio GPT. Give a writing task, then provide correction, C1 alternatives, structure feedback, and one focused rewrite drill.";
+                return "Act as Writing Studio GPT. Give a writing task, then provide correction and C1 alternatives.";
             case "Input Immersion":
-                return "Act as Input Immersion GPT. Provide reading or listening-style input, comprehension checks, and active-use transfer into the learner's own sentences.";
+                return "Act as Input Immersion GPT. Provide reading or listening-style input with comprehension checks.";
             case "Error Analyst":
-                return "Act as Error Analyst GPT. Identify recurring patterns, root causes, micro-drills, and review queue additions. This step is non-negotiable before closing.";
+                return "Act as Error Analyst GPT. Identify recurring patterns and root causes.";
             case "Diagnostic Coach":
-                return "Act as Diagnostic Coach GPT. Evaluate CEFR across speaking, writing, listening, reading, grammar, vocabulary, fluency, and pragmatics. Give scores and recalibration advice.";
+                return "Act as Diagnostic Coach GPT. Evaluate CEFR across skills.";
             default:
                 return "Run this step as part of the B2 to C1 fluency chain.";
         }
