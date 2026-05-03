@@ -196,61 +196,68 @@ public class MainActivity extends Activity {
     private View buildHomeTab() {
         mainScrollView = new ScrollView(this);
         mainScrollView.setFillViewport(true);
+        mainScrollView.setBackgroundColor(Color.rgb(245, 247, 250));
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(20), dp(20), dp(20), dp(32));
+        content.setPadding(dp(20), dp(24), dp(20), dp(40));
         mainScrollView.addView(content);
 
-        // Hero Header
+        // Premium Hero Header
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setPadding(0, 0, 0, dp(24));
+        hero.setPadding(dp(4), 0, 0, dp(28));
         
         TextView title = new TextView(this);
         title.setText("Learning Hub");
-        title.setTextColor(Color.rgb(21, 35, 52));
-        title.setTextSize(28);
+        title.setTextColor(Color.rgb(26, 32, 44));
+        title.setTextSize(30);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         hero.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Practice your English with C1 Coaching");
-        subtitle.setTextColor(Color.rgb(100, 110, 130));
+        subtitle.setText("Elevate your English to C1 mastery");
+        subtitle.setTextColor(Color.rgb(113, 128, 150));
         subtitle.setTextSize(16);
         subtitle.setPadding(0, dp(4), 0, 0);
         hero.addView(subtitle);
         content.addView(hero);
 
+        // Progress Section - Cleaner and more focused
         content.addView(sectionHeader("📊 Session Progress"));
         LinearLayout progressPanel = panel();
         content.addView(progressPanel);
         
         LinearLayout stepContainer = horizontal();
-        stepContainer.setPadding(0, 0, 0, dp(16));
+        stepContainer.setPadding(0, dp(8), 0, dp(20));
         stepViews = new TextView[STEPS.length];
         for (int i = 0; i < STEPS.length; i++) {
             stepViews[i] = new TextView(this);
             stepViews[i].setText(STEPS[i]);
-            stepViews[i].setTextSize(11);
+            stepViews[i].setTextSize(10);
             stepViews[i].setGravity(Gravity.CENTER);
-            stepViews[i].setPadding(dp(4), dp(4), dp(4), dp(4));
+            stepViews[i].setPadding(dp(2), dp(6), dp(2), dp(6));
             stepViews[i].setTypeface(Typeface.DEFAULT_BOLD);
             stepContainer.addView(stepViews[i], weightParams());
         }
         progressPanel.addView(stepContainer);
 
         currentStepView = new TextView(this);
-        currentStepView.setText("No active session");
+        currentStepView.setText("READY TO START");
         currentStepView.setTextColor(Color.rgb(63, 81, 181));
-        currentStepView.setTextSize(15);
-        currentStepView.setTypeface(Typeface.DEFAULT_BOLD);
+        currentStepView.setTextSize(13);
+        currentStepView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         currentStepView.setGravity(Gravity.CENTER);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            currentStepView.setLetterSpacing(0.1f);
+        }
         progressPanel.addView(currentStepView);
 
-        content.addView(sectionHeader("🎯 Practice Configuration"));
+        // Configuration Section
+        content.addView(sectionHeader("🎯 Practice Setup"));
         LinearLayout modePanel = panel();
         content.addView(modePanel);
+        
         modePanel.addView(label("Focus Area"));
         focusSpinner = spinner(Arrays.asList(
                 "Auto",
@@ -260,46 +267,42 @@ public class MainActivity extends Activity {
                 "Diagnostic Coach"
         ));
         modePanel.addView(focusSpinner);
+        
         modePanel.addView(label("Session Length"));
         dayTypeSpinner = spinner(Arrays.asList("Short day", "Full day"));
         modePanel.addView(dayTypeSpinner);
 
-        LinearLayout actionPanel = panel();
-        content.addView(actionPanel);
-        LinearLayout rowOne = horizontal();
+        // Main Action - Dominant CTA
+        LinearLayout startContainer = new LinearLayout(this);
+        startContainer.setPadding(0, dp(8), 0, dp(16));
         startButton = button("Begin New Session");
-        nextButton = secondaryButton("Next Step");
-        rowOne.addView(startButton, weightParams());
-        rowOne.addView(nextButton, weightParams());
-        actionPanel.addView(rowOne);
+        startContainer.addView(startButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
+        content.addView(startContainer);
 
-        LinearLayout rowTwo = horizontal();
-        saveButton = secondaryButton("Save Progress");
-        rowTwo.addView(saveButton, weightParams());
-        actionPanel.addView(rowTwo);
-
+        // History Section - Cleaner Card
         content.addView(sectionHeader("💬 Interaction History"));
         LinearLayout transcriptPanel = panel();
-        transcriptPanel.setPadding(dp(8), dp(16), dp(8), dp(16));
+        transcriptPanel.setPadding(dp(12), dp(20), dp(12), dp(20));
         content.addView(transcriptPanel);
         
         transcriptContainer = new LinearLayout(this);
         transcriptContainer.setOrientation(LinearLayout.VERTICAL);
         
         TextView emptyState = new TextView(this);
-        emptyState.setText("Practice history will appear here");
-        emptyState.setTextColor(Color.rgb(160, 170, 185));
+        emptyState.setText("Your conversation history will appear here");
+        emptyState.setTextColor(Color.rgb(160, 174, 192));
         emptyState.setTextSize(14);
         emptyState.setGravity(Gravity.CENTER);
-        emptyState.setPadding(0, dp(32), 0, dp(32));
+        emptyState.setPadding(0, dp(40), 0, dp(40));
         transcriptContainer.addView(emptyState);
-        
         transcriptPanel.addView(transcriptContainer);
 
+        // Input Section
         content.addView(sectionHeader("✍️ Your Response"));
         LinearLayout inputPanel = panel();
         content.addView(inputPanel);
-        userInput = multiLineField("Type your answer or request...");
+        userInput = multiLineField("Share your thoughts or complete the task...");
         inputPanel.addView(userInput);
 
         LinearLayout inputActions = horizontal();
@@ -309,6 +312,15 @@ public class MainActivity extends Activity {
         inputActions.addView(micButton, weightParams());
         inputActions.addView(sendButton, weightParams());
         inputPanel.addView(inputActions);
+
+        // Secondary Actions - Tucked away but accessible
+        LinearLayout secondaryActions = horizontal();
+        secondaryActions.setPadding(0, dp(24), 0, 0);
+        nextButton = secondaryButton("Next Step");
+        saveButton = secondaryButton("Save Session");
+        secondaryActions.addView(nextButton, weightParams());
+        secondaryActions.addView(saveButton, weightParams());
+        content.addView(secondaryActions);
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setIndeterminate(true);
@@ -421,13 +433,13 @@ public class MainActivity extends Activity {
     private TextView sectionHeader(String text) {
         TextView label = new TextView(this);
         label.setText(text.toUpperCase(Locale.US));
-        label.setTextColor(Color.rgb(63, 81, 181));
-        label.setTextSize(12);
+        label.setTextColor(Color.rgb(113, 128, 150));
+        label.setTextSize(11);
         label.setTypeface(Typeface.DEFAULT_BOLD);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            label.setLetterSpacing(0.05f);
+            label.setLetterSpacing(0.08f);
         }
-        label.setPadding(dp(4), dp(16), 0, dp(8));
+        label.setPadding(dp(4), dp(24), 0, dp(12));
         return label;
     }
 
@@ -556,10 +568,10 @@ public class MainActivity extends Activity {
                 stepViews[i].setTextColor(Color.WHITE);
                 GradientDrawable active = new GradientDrawable();
                 active.setColor(Color.rgb(63, 81, 181));
-                active.setCornerRadius(dp(4));
+                active.setCornerRadius(dp(100)); // Capsule shape
                 stepViews[i].setBackground(active);
             } else {
-                stepViews[i].setTextColor(Color.rgb(120, 130, 140));
+                stepViews[i].setTextColor(Color.rgb(160, 174, 192));
                 stepViews[i].setBackground(null);
             }
         }
