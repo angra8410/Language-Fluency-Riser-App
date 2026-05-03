@@ -1,0 +1,10 @@
+com.example.languagefluencyriser:string/app_name = 0x7f020000
+com.example.languagefluencyriser:color/primary_dark = 0x7f010006
+com.example.languagefluencyriser:color/primary = 0x7f010005
+com.example.languagefluencyriser:color/line = 0x7f010002
+com.example.languagefluencyriser:color/panel = 0x7f010004
+com.example.languagefluencyriser:style/AppTheme = 0x7f030000
+com.example.languagefluencyriser:color/muted = 0x7f010003
+com.example.languagefluencyriser:color/surface = 0x7f010007
+com.example.languagefluencyriser:color/ink = 0x7f010001
+com.example.languagefluencyriser:color/accent = 0x7f010000

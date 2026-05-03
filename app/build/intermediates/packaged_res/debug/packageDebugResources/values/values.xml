@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="accent">#B25E2B</color>
+    <color name="ink">#17202A</color>
+    <color name="line">#D6DAE1</color>
+    <color name="muted">#5D6673</color>
+    <color name="panel">#FFFFFF</color>
+    <color name="primary">#126C5A</color>
+    <color name="primary_dark">#0E5144</color>
+    <color name="surface">#F7F8FA</color>
+    <string name="app_name">Language Fluency Riser</string>
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

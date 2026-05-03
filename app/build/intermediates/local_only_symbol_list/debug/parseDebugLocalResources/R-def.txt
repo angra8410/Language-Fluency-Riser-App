@@ -1,0 +1,12 @@
+R_DEF: Internal format may change without notice
+local
+color accent
+color ink
+color line
+color muted
+color panel
+color primary
+color primary_dark
+color surface
+string app_name
+style AppTheme
