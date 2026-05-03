@@ -21,6 +21,7 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -69,8 +70,13 @@ public class MainActivity extends Activity {
     private EditText serverUrlField;
     private EditText modelField;
     private EditText userInput;
-    private TextView transcriptView;
+    private ScrollView mainScrollView;
+    private LinearLayout transcriptContainer;
     private TextView statusView;
+    private FrameLayout tabContentContainer;
+    private View homeTab, historyTab, settingsTab;
+    private View homeNav, historyNav, settingsNav;
+    private int currentTab = 0;
     private TextView currentStepView;
     private Spinner focusSpinner;
     private Spinner dayTypeSpinner;
@@ -103,71 +109,155 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        ScrollView scrollView = new ScrollView(this);
-        scrollView.setFillViewport(true);
-        scrollView.setBackgroundColor(Color.rgb(243, 246, 250));
-
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(18), dp(18), dp(24));
-        scrollView.addView(root, new ScrollView.LayoutParams(
-                ScrollView.LayoutParams.MATCH_PARENT,
-                ScrollView.LayoutParams.WRAP_CONTENT
-        ));
+        root.setBackgroundColor(Color.rgb(243, 246, 250));
 
+        tabContentContainer = new FrameLayout(this);
+        root.addView(tabContentContainer, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+
+        // Navigation Bar
+        LinearLayout navBar = new LinearLayout(this);
+        navBar.setOrientation(LinearLayout.HORIZONTAL);
+        navBar.setBackgroundColor(Color.WHITE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            navBar.setElevation(dp(8));
+        }
+        root.addView(navBar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(60)));
+
+        homeNav = navItem("Home", "🏠");
+        historyNav = navItem("History", "📜");
+        settingsNav = navItem("Settings", "⚙️");
+
+        navBar.addView(homeNav, weightParams());
+        navBar.addView(historyNav, weightParams());
+        navBar.addView(settingsNav, weightParams());
+
+        // Tabs
+        homeTab = buildHomeTab();
+        historyTab = buildHistoryTab();
+        settingsTab = buildSettingsTab();
+
+        tabContentContainer.addView(homeTab);
+        tabContentContainer.addView(historyTab);
+        tabContentContainer.addView(settingsTab);
+
+        setContentView(root);
+
+        homeNav.setOnClickListener(v -> switchTab(0));
+        historyNav.setOnClickListener(v -> switchTab(1));
+        settingsNav.setOnClickListener(v -> switchTab(2));
+
+        switchTab(0);
+        initSpeechRecognizer();
+    }
+
+    private View navItem(String label, String icon) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setGravity(Gravity.CENTER);
+        item.setClickable(true);
+        item.setFocusable(true);
+
+        TextView iconView = new TextView(this);
+        iconView.setText(icon);
+        iconView.setTextSize(20);
+        item.addView(iconView);
+
+        TextView labelView = new TextView(this);
+        labelView.setText(label);
+        labelView.setTextSize(10);
+        labelView.setTypeface(Typeface.DEFAULT_BOLD);
+        item.addView(labelView);
+
+        return item;
+    }
+
+    private void switchTab(int index) {
+        currentTab = index;
+        homeTab.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
+        historyTab.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
+        settingsTab.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
+
+        updateNavItemStyle(homeNav, index == 0);
+        updateNavItemStyle(historyNav, index == 1);
+        updateNavItemStyle(settingsNav, index == 2);
+    }
+
+    private void updateNavItemStyle(View view, boolean active) {
+        LinearLayout layout = (LinearLayout) view;
+        int color = active ? Color.rgb(63, 81, 181) : Color.rgb(120, 130, 150);
+        ((TextView) layout.getChildAt(0)).setAlpha(active ? 1.0f : 0.6f);
+        ((TextView) layout.getChildAt(1)).setTextColor(color);
+    }
+
+    private View buildHomeTab() {
+        mainScrollView = new ScrollView(this);
+        mainScrollView.setFillViewport(true);
+        mainScrollView.setBackgroundColor(Color.rgb(245, 247, 250));
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(24), dp(20), dp(40));
+        mainScrollView.addView(content);
+
+        // Premium Hero Header
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setPadding(dp(4), 0, 0, dp(28));
+        
         TextView title = new TextView(this);
-        title.setText("Language Fluency Riser");
-        title.setTextColor(Color.rgb(21, 35, 52));
-        title.setTextSize(26);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        root.addView(title);
+        title.setText("Learning Hub");
+        title.setTextColor(Color.rgb(26, 32, 44));
+        title.setTextSize(30);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        hero.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Local C1 English coaching chain powered by Ollama.");
-        subtitle.setTextColor(Color.rgb(80, 93, 110));
-        subtitle.setTextSize(15);
-        subtitle.setPadding(0, dp(4), 0, dp(14));
-        root.addView(subtitle);
+        subtitle.setText("Elevate your English to C1 mastery");
+        subtitle.setTextColor(Color.rgb(113, 128, 150));
+        subtitle.setTextSize(16);
+        subtitle.setPadding(0, dp(4), 0, 0);
+        hero.addView(subtitle);
+        content.addView(hero);
 
-        TextView settingsLabel = label("SETTINGS");
-        settingsLabel.setPadding(0, 0, 0, dp(8));
-        root.addView(settingsLabel);
-
-        LinearLayout configPanel = panel();
-        root.addView(configPanel);
-        configPanel.addView(label("Ollama server"));
-        serverUrlField = field(defaultServerUrl());
-        configPanel.addView(serverUrlField);
-        configPanel.addView(hintText("Phone over USB: adb reverse tcp:11434 tcp:11434. Emulator: http://10.0.2.2:11434."));
-        configPanel.addView(label("Model"));
-        modelField = field(DEFAULT_MODEL);
-        configPanel.addView(modelField);
-
-        LinearLayout configActions = horizontal();
-        testButton = button("Test Connection");
-        configActions.addView(testButton, weightParams());
-        configPanel.addView(configActions);
-
-        TextView sessionLabel = label("SESSION PROGRESS");
-        sessionLabel.setPadding(0, dp(12), 0, dp(8));
-        root.addView(sessionLabel);
-
+        // Progress Section - Cleaner and more focused
+        content.addView(sectionHeader("📊 Session Progress"));
+        LinearLayout progressPanel = panel();
+        content.addView(progressPanel);
+        
         LinearLayout stepContainer = horizontal();
-        stepContainer.setPadding(0, 0, 0, dp(12));
+        stepContainer.setPadding(0, dp(8), 0, dp(20));
         stepViews = new TextView[STEPS.length];
         for (int i = 0; i < STEPS.length; i++) {
             stepViews[i] = new TextView(this);
             stepViews[i].setText(STEPS[i]);
-            stepViews[i].setTextSize(11);
+            stepViews[i].setTextSize(10);
             stepViews[i].setGravity(Gravity.CENTER);
-            stepViews[i].setPadding(dp(4), dp(2), dp(4), dp(2));
+            stepViews[i].setPadding(dp(2), dp(6), dp(2), dp(6));
             stepViews[i].setTypeface(Typeface.DEFAULT_BOLD);
             stepContainer.addView(stepViews[i], weightParams());
         }
-        root.addView(stepContainer);
+        progressPanel.addView(stepContainer);
 
+        currentStepView = new TextView(this);
+        currentStepView.setText("READY TO START");
+        currentStepView.setTextColor(Color.rgb(63, 81, 181));
+        currentStepView.setTextSize(13);
+        currentStepView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        currentStepView.setGravity(Gravity.CENTER);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            currentStepView.setLetterSpacing(0.1f);
+        }
+        progressPanel.addView(currentStepView);
+
+        // Configuration Section
+        content.addView(sectionHeader("🎯 Practice Setup"));
         LinearLayout modePanel = panel();
-        root.addView(modePanel);
+        content.addView(modePanel);
+        
         modePanel.addView(label("Focus Area"));
         focusSpinner = spinner(Arrays.asList(
                 "Auto",
@@ -177,93 +267,157 @@ public class MainActivity extends Activity {
                 "Diagnostic Coach"
         ));
         modePanel.addView(focusSpinner);
+        
         modePanel.addView(label("Session Length"));
         dayTypeSpinner = spinner(Arrays.asList("Short day", "Full day"));
         modePanel.addView(dayTypeSpinner);
 
-        LinearLayout actionPanel = panel();
-        root.addView(actionPanel);
-        LinearLayout rowOne = horizontal();
-        startButton = button("Begin Practice");
-        nextButton = button("Continue to Next Task");
-        rowOne.addView(startButton, weightParams());
-        rowOne.addView(nextButton, weightParams());
-        actionPanel.addView(rowOne);
+        // Main Action - Dominant CTA
+        LinearLayout startContainer = new LinearLayout(this);
+        startContainer.setPadding(0, dp(8), 0, dp(16));
+        startButton = button("Begin New Session");
+        startContainer.addView(startButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(54)));
+        content.addView(startContainer);
 
-        LinearLayout rowTwo = horizontal();
-        saveButton = button("Save Session");
-        rowTwo.addView(saveButton, weightParams());
-        actionPanel.addView(rowTwo);
-
-        currentStepView = new TextView(this);
-        currentStepView.setText("Waiting to start...");
-        currentStepView.setTextColor(Color.rgb(36, 54, 76));
-        currentStepView.setTextSize(15);
-        currentStepView.setTypeface(Typeface.DEFAULT_BOLD);
-        currentStepView.setPadding(0, dp(8), 0, 0);
-        actionPanel.addView(currentStepView);
-
+        // History Section - Cleaner Card
+        content.addView(sectionHeader("💬 Interaction History"));
         LinearLayout transcriptPanel = panel();
-        root.addView(transcriptPanel);
-        transcriptPanel.addView(label("Conversation History"));
-        transcriptView = new TextView(this);
-        transcriptView.setText("Your practice session will appear here.");
-        transcriptView.setTextColor(Color.rgb(140, 150, 160));
-        transcriptView.setTextSize(15);
-        transcriptView.setLineSpacing(0, 1.12f);
-        transcriptView.setTextIsSelectable(true);
-        transcriptPanel.addView(transcriptView);
+        transcriptPanel.setPadding(dp(12), dp(20), dp(12), dp(20));
+        content.addView(transcriptPanel);
+        
+        transcriptContainer = new LinearLayout(this);
+        transcriptContainer.setOrientation(LinearLayout.VERTICAL);
+        
+        TextView emptyState = new TextView(this);
+        emptyState.setText("Your conversation history will appear here");
+        emptyState.setTextColor(Color.rgb(160, 174, 192));
+        emptyState.setTextSize(14);
+        emptyState.setGravity(Gravity.CENTER);
+        emptyState.setPadding(0, dp(40), 0, dp(40));
+        transcriptContainer.addView(emptyState);
+        transcriptPanel.addView(transcriptContainer);
 
+        // Input Section
+        content.addView(sectionHeader("✍️ Your Response"));
         LinearLayout inputPanel = panel();
-        root.addView(inputPanel);
-        inputPanel.addView(label("Your Response"));
-        userInput = multiLineField("Type your answer here...");
+        content.addView(inputPanel);
+        userInput = multiLineField("Share your thoughts or complete the task...");
         inputPanel.addView(userInput);
 
         LinearLayout inputActions = horizontal();
-        micButton = button("🎤 Record Voice");
+        micButton = secondaryButton("🎤 Record");
         micButton.setVisibility(View.GONE);
-        sendButton = button("Submit Answer");
+        sendButton = button("Submit Response");
         inputActions.addView(micButton, weightParams());
         inputActions.addView(sendButton, weightParams());
         inputPanel.addView(inputActions);
 
+        // Secondary Actions - Tucked away but accessible
+        LinearLayout secondaryActions = horizontal();
+        secondaryActions.setPadding(0, dp(24), 0, 0);
+        nextButton = secondaryButton("Next Step");
+        saveButton = secondaryButton("Save Session");
+        secondaryActions.addView(nextButton, weightParams());
+        secondaryActions.addView(saveButton, weightParams());
+        content.addView(secondaryActions);
+
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setIndeterminate(true);
         progressBar.setVisibility(View.GONE);
-        root.addView(progressBar);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            progressBar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(Color.rgb(63, 81, 181)));
+        }
+        content.addView(progressBar);
 
-        statusView = new TextView(this);
-        statusView.setTextColor(Color.rgb(88, 101, 118));
-        statusView.setTextSize(13);
-        statusView.setGravity(Gravity.CENTER);
-        statusView.setPadding(0, dp(14), 0, 0);
-        root.addView(statusView);
-
-        setContentView(scrollView);
         startButton.setOnClickListener(v -> startChain());
         nextButton.setOnClickListener(v -> nextStep());
         saveButton.setOnClickListener(v -> saveSessionLog());
         sendButton.setOnClickListener(v -> sendCurrentInput());
-        testButton.setOnClickListener(v -> testConnection());
         micButton.setOnClickListener(v -> toggleMic());
-        initSpeechRecognizer();
+
+        return mainScrollView;
+    }
+
+    private View buildHistoryTab() {
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setFillViewport(true);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(20), dp(20), dp(32));
+        scrollView.addView(content);
+
+        content.addView(sectionHeader("📜 Practice History"));
+        
+        LinearLayout historyPanel = panel();
+        content.addView(historyPanel);
+        
+        TextView placeholder = new TextView(this);
+        placeholder.setText("No practice history yet.\nYour completed sessions will appear here.");
+        placeholder.setTextColor(Color.rgb(100, 110, 130));
+        placeholder.setTextSize(14);
+        placeholder.setGravity(Gravity.CENTER);
+        placeholder.setPadding(0, dp(64), 0, dp(64));
+        historyPanel.addView(placeholder);
+
+        return scrollView;
+    }
+
+    private View buildSettingsTab() {
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setFillViewport(true);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(20), dp(20), dp(32));
+        scrollView.addView(content);
+
+        content.addView(sectionHeader("⚙️ Connection Settings"));
+        LinearLayout configPanel = panel();
+        content.addView(configPanel);
+        configPanel.addView(label("Ollama Server URL"));
+        serverUrlField = field(defaultServerUrl());
+        configPanel.addView(serverUrlField);
+        configPanel.addView(hintText("USB: adb reverse tcp:11434 tcp:11434. Emulator: 10.0.2.2."));
+        
+        configPanel.addView(label("AI Model"));
+        modelField = field(DEFAULT_MODEL);
+        configPanel.addView(modelField);
+
+        LinearLayout configActions = horizontal();
+        testButton = secondaryButton("Test Connection");
+        configActions.addView(testButton, weightParams());
+        configPanel.addView(configActions);
+
+        statusView = new TextView(this);
+        statusView.setTextColor(Color.rgb(120, 130, 150));
+        statusView.setTextSize(13);
+        statusView.setGravity(Gravity.CENTER);
+        statusView.setPadding(0, dp(16), 0, 0);
+        content.addView(statusView);
+
+        testButton.setOnClickListener(v -> testConnection());
+
+        return scrollView;
     }
 
     private LinearLayout panel() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(14), dp(14), dp(14), dp(14));
+        panel.setPadding(dp(16), dp(16), dp(16), dp(16));
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(Color.WHITE);
-        drawable.setCornerRadius(dp(8));
-        drawable.setStroke(dp(1), Color.rgb(220, 227, 236));
+        drawable.setCornerRadius(dp(12));
         panel.setBackground(drawable);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            panel.setElevation(dp(2));
+        }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        params.setMargins(0, 0, 0, dp(12));
+        params.setMargins(0, 0, 0, dp(16));
         panel.setLayoutParams(params);
         return panel;
     }
@@ -276,11 +430,24 @@ public class MainActivity extends Activity {
         return row;
     }
 
+    private TextView sectionHeader(String text) {
+        TextView label = new TextView(this);
+        label.setText(text.toUpperCase(Locale.US));
+        label.setTextColor(Color.rgb(113, 128, 150));
+        label.setTextSize(11);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            label.setLetterSpacing(0.08f);
+        }
+        label.setPadding(dp(4), dp(24), 0, dp(12));
+        return label;
+    }
+
     private TextView label(String text) {
         TextView label = new TextView(this);
         label.setText(text);
         label.setTextColor(Color.rgb(68, 83, 102));
-        label.setTextSize(13);
+        label.setTextSize(14);
         label.setTypeface(Typeface.DEFAULT_BOLD);
         label.setPadding(0, dp(8), 0, dp(4));
         return label;
@@ -300,14 +467,15 @@ public class MainActivity extends Activity {
         field.setSingleLine(true);
         field.setHint(hint);
         field.setTextColor(Color.rgb(24, 33, 45));
-        field.setTextSize(15);
+        field.setTextSize(16);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        field.setPadding(dp(10), 0, dp(10), 0);
+        field.setPadding(dp(12), 0, dp(12), 0);
         field.setBackground(inputBackground());
-        field.setLayoutParams(new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(46)
-        ));
+                dp(48)
+        );
+        field.setLayoutParams(params);
         return field;
     }
 
@@ -316,18 +484,18 @@ public class MainActivity extends Activity {
         field.setHint(hint);
         field.setMinLines(4);
         field.setGravity(Gravity.TOP | Gravity.START);
-        field.setTextSize(15);
+        field.setTextSize(16);
         field.setTextColor(Color.rgb(24, 33, 45));
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        field.setPadding(dp(10), dp(10), dp(10), dp(10));
+        field.setPadding(dp(12), dp(12), dp(12), dp(12));
         field.setBackground(inputBackground());
         return field;
     }
 
     private GradientDrawable inputBackground() {
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.rgb(250, 252, 255));
-        drawable.setCornerRadius(dp(6));
+        drawable.setColor(Color.rgb(248, 250, 253));
+        drawable.setCornerRadius(dp(8));
         drawable.setStroke(dp(1), Color.rgb(209, 218, 229));
         return drawable;
     }
@@ -345,6 +513,8 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(48)
         ));
+        spinner.setPadding(dp(8), 0, dp(8), 0);
+        spinner.setBackground(inputBackground());
         return spinner;
     }
 
@@ -352,6 +522,36 @@ public class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(text);
         button.setAllCaps(false);
+        button.setTextColor(Color.WHITE);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextSize(15);
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(Color.rgb(63, 81, 181));
+        drawable.setCornerRadius(dp(8));
+        button.setBackground(drawable);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            button.setElevation(dp(2));
+            button.setStateListAnimator(null); // Remove default button shadow on press for custom feel
+        }
+        return button;
+    }
+
+    private Button secondaryButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextColor(Color.rgb(63, 81, 181));
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextSize(15);
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(Color.WHITE);
+        drawable.setCornerRadius(dp(8));
+        drawable.setStroke(dp(2), Color.rgb(63, 81, 181));
+        button.setBackground(drawable);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            button.setElevation(0);
+            button.setStateListAnimator(null);
+        }
         return button;
     }
 
@@ -368,10 +568,10 @@ public class MainActivity extends Activity {
                 stepViews[i].setTextColor(Color.WHITE);
                 GradientDrawable active = new GradientDrawable();
                 active.setColor(Color.rgb(63, 81, 181));
-                active.setCornerRadius(dp(4));
+                active.setCornerRadius(dp(100)); // Capsule shape
                 stepViews[i].setBackground(active);
             } else {
-                stepViews[i].setTextColor(Color.rgb(120, 130, 140));
+                stepViews[i].setTextColor(Color.rgb(160, 174, 192));
                 stepViews[i].setBackground(null);
             }
         }
@@ -405,7 +605,7 @@ public class MainActivity extends Activity {
         chain.addAll(buildChain());
         chainIndex = -1;
         transcript.setLength(0);
-        transcriptView.setText("");
+        transcriptContainer.removeAllViews();
         appendSystem("Chain: " + String.join(" -> ", chain));
         nextStep();
     }
@@ -658,10 +858,71 @@ public class MainActivity extends Activity {
 
     private void appendTranscript(String speaker, String text) {
         if (transcript.length() == 0) {
-            transcriptView.setTextColor(Color.rgb(24, 33, 45));
+            transcriptContainer.removeAllViews();
         }
         transcript.append("\n\n[").append(speaker).append("]\n").append(text.trim());
-        transcriptView.setText(transcript.toString().trim());
+        
+        LinearLayout bubble = new LinearLayout(this);
+        bubble.setOrientation(LinearLayout.VERTICAL);
+        bubble.setPadding(dp(12), dp(8), dp(12), dp(8));
+        
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setCornerRadius(dp(16));
+        
+        TextView speakerView = new TextView(this);
+        speakerView.setText(speaker.toUpperCase(Locale.US));
+        speakerView.setTextSize(10);
+        speakerView.setTypeface(Typeface.DEFAULT_BOLD);
+        
+        if ("You".equals(speaker)) {
+            drawable.setColor(Color.rgb(232, 240, 254));
+            speakerView.setTextColor(Color.rgb(25, 103, 210));
+        } else if ("System".equals(speaker)) {
+            drawable.setColor(Color.rgb(241, 243, 244));
+            speakerView.setTextColor(Color.rgb(95, 99, 104));
+        } else {
+            drawable.setColor(Color.WHITE);
+            drawable.setStroke(dp(1), Color.rgb(218, 220, 224));
+            speakerView.setTextColor(Color.rgb(63, 81, 181));
+        }
+        
+        bubble.setBackground(drawable);
+        
+        TextView contentView = new TextView(this);
+        contentView.setText(text.trim());
+        contentView.setTextColor(Color.rgb(32, 33, 36));
+        contentView.setTextSize(15);
+        contentView.setTextIsSelectable(true);
+        
+        bubble.addView(speakerView);
+        bubble.addView(contentView);
+        
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.setMargins(0, 0, 0, dp(12));
+        
+        if ("You".equals(speaker)) {
+            params.gravity = Gravity.END;
+            params.setMargins(dp(48), 0, 0, dp(12));
+            bubble.setGravity(Gravity.END);
+        } else if ("System".equals(speaker)) {
+            params.gravity = Gravity.CENTER;
+            params.setMargins(dp(24), 0, dp(24), dp(12));
+            bubble.setGravity(Gravity.CENTER);
+        } else {
+            params.gravity = Gravity.START;
+            params.setMargins(0, 0, dp(48), dp(12));
+            bubble.setGravity(Gravity.START);
+        }
+        
+        transcriptContainer.addView(bubble, params);
+        
+        // Auto-scroll
+        mainHandler.postDelayed(() -> {
+            mainScrollView.smoothScrollTo(0, transcriptContainer.getBottom() + dp(100));
+        }, 100);
     }
 
     private void setBusy(boolean busy) {
