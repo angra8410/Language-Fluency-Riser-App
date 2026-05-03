@@ -99,6 +99,7 @@ public class MainActivity extends Activity {
     private View homeNav, historyNav, settingsNav;
     private int currentTab = 0;
     private TextView currentStepView;
+    private TextView autoFocusInfo;
     private Spinner focusSpinner;
     private Spinner dayTypeSpinner;
     private Button startButton;
@@ -382,6 +383,28 @@ public class MainActivity extends Activity {
                 "Diagnostic Coach"
         ));
         modePanel.addView(focusSpinner);
+        
+        autoFocusInfo = new TextView(this);
+        autoFocusInfo.setTextColor(Color.rgb(63, 81, 181));
+        autoFocusInfo.setTextSize(12);
+        autoFocusInfo.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        autoFocusInfo.setPadding(dp(4), dp(4), 0, dp(8));
+        autoFocusInfo.setVisibility(View.GONE);
+        modePanel.addView(autoFocusInfo);
+        
+        focusSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                String selected = String.valueOf(focusSpinner.getSelectedItem());
+                if ("Auto".equals(selected)) {
+                    autoFocusInfo.setText("Auto selected: " + roleForToday());
+                    autoFocusInfo.setVisibility(View.VISIBLE);
+                } else {
+                    autoFocusInfo.setVisibility(View.GONE);
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
         
         modePanel.addView(label("Session Length"));
         dayTypeSpinner = spinner(Arrays.asList("Short day", "Full day"));
