@@ -102,6 +102,8 @@ public class MainActivity extends Activity {
     private TextView currentStepView;
     private TextView autoFocusInfo;
     private Spinner focusSpinner;
+    private String selectedFocusArea = "Auto";
+    private LinearLayout[] focusCards;
     private Spinner dayTypeSpinner;
     private Button startButton;
     private Button nextButton;
@@ -399,6 +401,8 @@ public class MainActivity extends Activity {
         content.addView(modePanel);
         
         modePanel.addView(label("Focus Area"));
+        
+        // Hidden spinner to keep existing logic working
         focusSpinner = spinner(Arrays.asList(
                 "Auto",
                 "Speaking Lab",
@@ -406,7 +410,63 @@ public class MainActivity extends Activity {
                 "Input Immersion",
                 "Diagnostic Coach"
         ));
+        focusSpinner.setVisibility(View.GONE);
         modePanel.addView(focusSpinner);
+
+        // New Card Grid
+        android.widget.GridLayout focusGrid = new android.widget.GridLayout(this);
+        focusGrid.setColumnCount(3);
+        focusGrid.setRowCount(2);
+        focusGrid.setAlignmentMode(android.widget.GridLayout.ALIGN_BOUNDS);
+        focusGrid.setUseDefaultMargins(false);
+        
+        String[] labels = {"Auto", "Speaking Lab", "Writing Studio", "Input Immersion", "Diagnostic Coach"};
+        String[] icons = {"★", "🎙️", "📝", "📖", "🩺"};
+        focusCards = new LinearLayout[labels.length];
+        
+        for (int i = 0; i < labels.length; i++) {
+            final int index = i;
+            final String labelText = labels[i];
+            
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setGravity(Gravity.CENTER);
+            card.setPadding(dp(8), dp(16), dp(8), dp(16));
+            card.setClickable(true);
+            card.setFocusable(true);
+            
+            android.widget.GridLayout.LayoutParams params = new android.widget.GridLayout.LayoutParams();
+            params.width = 0;
+            params.height = dp(90);
+            params.columnSpec = android.widget.GridLayout.spec(i % 3, 1f);
+            params.rowSpec = android.widget.GridLayout.spec(i / 3, 1f);
+            params.setMargins(dp(4), dp(4), dp(4), dp(4));
+            card.setLayoutParams(params);
+            
+            TextView iconView = new TextView(this);
+            iconView.setText(icons[i]);
+            iconView.setTextSize(24);
+            card.addView(iconView);
+            
+            TextView labelView = new TextView(this);
+            labelView.setText(labelText);
+            labelView.setTextSize(11);
+            labelView.setGravity(Gravity.CENTER);
+            labelView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            labelView.setPadding(0, dp(4), 0, 0);
+            card.addView(labelView);
+            
+            card.setOnClickListener(v -> {
+                focusSpinner.setSelection(index);
+                updateFocusCardsUi(index);
+            });
+            
+            focusCards[i] = card;
+            focusGrid.addView(card);
+        }
+        
+        updateFocusCardsUi(0); // Initialize with 'Auto' selected
+        modePanel.addView(focusGrid);
         
         autoFocusInfo = new TextView(this);
         autoFocusInfo.setTextColor(Color.rgb(63, 81, 181));
@@ -415,20 +475,6 @@ public class MainActivity extends Activity {
         autoFocusInfo.setPadding(dp(4), dp(4), 0, dp(8));
         autoFocusInfo.setVisibility(View.GONE);
         modePanel.addView(autoFocusInfo);
-        
-        focusSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
-                String selected = String.valueOf(focusSpinner.getSelectedItem());
-                if ("Auto".equals(selected)) {
-                    autoFocusInfo.setText("Auto selected: " + roleForToday());
-                    autoFocusInfo.setVisibility(View.VISIBLE);
-                } else {
-                    autoFocusInfo.setVisibility(View.GONE);
-                }
-            }
-            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-        });
         
         modePanel.addView(label("Session Length"));
         dayTypeSpinner = spinner(Arrays.asList("Short day", "Full day"));
@@ -562,6 +608,13 @@ public class MainActivity extends Activity {
                 }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+        
+        // Initial manual trigger to apply the adaptive UI for the starting selection (Auto)
+        focusSpinner.post(() -> {
+            if (focusSpinner.getOnItemSelectedListener() != null) {
+                focusSpinner.getOnItemSelectedListener().onItemSelected(focusSpinner, null, 0, 0);
+            }
         });
 
         // Secondary Actions - Tucked away but accessible
@@ -1601,13 +1654,46 @@ public class MainActivity extends Activity {
 
     private void updateMicButtonVisibility() {
         String step = currentStep();
+        String selected = String.valueOf(focusSpinner.getSelectedItem());
+        String effective = "Auto".equals(selected) ? roleForToday() : selected;
+        
+        boolean isSpeakingFocus = "Speaking Lab".equals(effective);
         boolean isSpeakingStep = "Speaking Lab".equals(step);
         
-        // Always hide standard mic button in favor of large one if in Speaking Lab focus
-        micButton.setVisibility(isSpeakingStep ? View.GONE : View.GONE); 
+        // Show large mic button if either the mode is Speaking Lab OR it's the specific Speaking Lab step
+        boolean showMic = isSpeakingFocus || isSpeakingStep;
         
-        // Show/hide large button and hint only during the actual Speaking Lab step
-        largeMicButton.setVisibility(isSpeakingStep ? View.VISIBLE : View.GONE);
-        speakingHint.setVisibility(isSpeakingStep ? View.VISIBLE : View.GONE);
+        largeMicButton.setVisibility(showMic ? View.VISIBLE : View.GONE);
+        speakingHint.setVisibility(showMic ? View.VISIBLE : View.GONE);
+        
+        // Adjust mic button text/icon if needed
+        if (showMic) {
+            speakingHint.setText(isSpeakingStep ? "🎙️ Adaptive UI: Optimized for speaking practice." : "🎙️ Speaking Focus active.");
+        }
+    }
+
+    private void updateFocusCardsUi(int selectedIndex) {
+        if (focusCards == null) return;
+        for (int i = 0; i < focusCards.length; i++) {
+            LinearLayout card = focusCards[i];
+            GradientDrawable drawable = new GradientDrawable();
+            drawable.setCornerRadius(dp(16));
+            
+            TextView iconView = (TextView) card.getChildAt(0);
+            TextView labelView = (TextView) card.getChildAt(1);
+            
+            if (i == selectedIndex) {
+                drawable.setColor(Color.rgb(232, 240, 254));
+                drawable.setStroke(dp(2), Color.rgb(63, 81, 181));
+                iconView.setAlpha(1.0f);
+                labelView.setTextColor(Color.rgb(63, 81, 181));
+            } else {
+                drawable.setColor(Color.WHITE);
+                drawable.setStroke(dp(1), Color.rgb(226, 232, 240));
+                iconView.setAlpha(0.5f);
+                labelView.setTextColor(Color.rgb(100, 116, 139));
+            }
+            card.setBackground(drawable);
+        }
     }
 }
