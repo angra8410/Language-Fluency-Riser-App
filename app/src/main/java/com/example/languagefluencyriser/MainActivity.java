@@ -92,6 +92,7 @@ public class MainActivity extends Activity {
     private EditText userInput;
     private ScrollView mainScrollView;
     private LinearLayout transcriptContainer;
+    private LinearLayout historyContainer;
     private TextView statusView;
     private FrameLayout tabContentContainer;
     private View homeTab, historyTab, settingsTab;
@@ -204,6 +205,97 @@ public class MainActivity extends Activity {
         updateNavItemStyle(homeNav, index == 0);
         updateNavItemStyle(historyNav, index == 1);
         updateNavItemStyle(settingsNav, index == 2);
+        
+        if (index == 1) {
+            loadHistory();
+        }
+    }
+
+    private void loadHistory() {
+        if (historyContainer == null) return;
+        historyContainer.removeAllViews();
+        
+        File dir = getFilesDir();
+        File[] logs = dir.listFiles((d, name) -> name.startsWith("session_log_") && name.endsWith(".json"));
+        
+        if (logs == null || logs.length == 0) {
+            LinearLayout emptyPanel = panel();
+            TextView emptyText = new TextView(this);
+            emptyText.setText("No practice history yet.\nYour completed sessions will appear here.");
+            emptyText.setTextColor(Color.rgb(113, 128, 150));
+            emptyText.setTextSize(14);
+            emptyText.setGravity(Gravity.CENTER);
+            emptyText.setPadding(0, dp(64), 0, dp(64));
+            emptyPanel.addView(emptyText);
+            historyContainer.addView(emptyPanel);
+            return;
+        }
+        
+        // Sort newest first
+        Arrays.sort(logs, (a, b) -> b.getName().compareTo(a.getName()));
+        
+        for (File log : logs) {
+            try {
+                JSONObject json = new JSONObject(readText(log));
+                String date = json.optString("date", "Unknown Date");
+                String model = json.optString("model", "Unknown Model");
+                String transcriptStr = json.optString("transcript", "");
+                
+                LinearLayout logPanel = panel();
+                logPanel.setClickable(true);
+                logPanel.setFocusable(true);
+                
+                TextView dateView = new TextView(this);
+                dateView.setText(date.replace("T", " ").substring(0, 16));
+                dateView.setTextColor(Color.rgb(30, 41, 59));
+                dateView.setTextSize(16);
+                dateView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+                logPanel.addView(dateView);
+                
+                TextView modelView = new TextView(this);
+                modelView.setText("Model: " + model);
+                modelView.setTextColor(Color.rgb(100, 116, 139));
+                modelView.setTextSize(12);
+                modelView.setPadding(0, dp(4), 0, dp(8));
+                logPanel.addView(modelView);
+                
+                TextView previewView = new TextView(this);
+                String preview = transcriptStr.replace("\n", " ").trim();
+                if (preview.length() > 100) preview = preview.substring(0, 97) + "...";
+                previewView.setText(preview);
+                previewView.setTextColor(Color.rgb(71, 85, 105));
+                previewView.setTextSize(14);
+                logPanel.addView(previewView);
+                
+                logPanel.setOnClickListener(v -> {
+                    // Show full transcript in the main interaction view
+                    appendSystem("Viewing history from " + date);
+                    transcript.setLength(0);
+                    transcriptContainer.removeAllViews();
+                    
+                    // Re-parse transcript into UI components
+                    String raw = transcriptStr;
+                    // Standardize separators for parsing
+                    if (raw.startsWith("\n\n[")) raw = raw.substring(2);
+                    String[] parts = raw.split("\n\n\\[");
+                    
+                    for (String part : parts) {
+                        if (part.isEmpty()) continue;
+                        int endBracket = part.indexOf("]");
+                        if (endBracket > 0) {
+                            String speaker = part.substring(0, endBracket);
+                            String text = part.substring(endBracket + 1).trim();
+                            appendTranscript(speaker, text);
+                        }
+                    }
+                    
+                    switchTab(0);
+                    mainScrollView.postDelayed(() -> mainScrollView.smoothScrollTo(0, 0), 100);
+                });
+                
+                historyContainer.addView(logPanel);
+            } catch (Exception ignored) {}
+        }
     }
 
     private void updateNavItemStyle(View view, boolean active) {
@@ -365,25 +457,19 @@ public class MainActivity extends Activity {
     private View buildHistoryTab() {
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
+        scrollView.setBackgroundColor(Color.rgb(248, 250, 253));
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(20), dp(20), dp(20), dp(32));
+        content.setPadding(dp(20), dp(32), dp(20), dp(48));
         scrollView.addView(content);
 
         content.addView(sectionHeader("📜 Practice History"));
         
-        LinearLayout historyPanel = panel();
-        content.addView(historyPanel);
+        historyContainer = new LinearLayout(this);
+        historyContainer.setOrientation(LinearLayout.VERTICAL);
+        content.addView(historyContainer);
         
-        TextView placeholder = new TextView(this);
-        placeholder.setText("No practice history yet.\nYour completed sessions will appear here.");
-        placeholder.setTextColor(Color.rgb(100, 110, 130));
-        placeholder.setTextSize(14);
-        placeholder.setGravity(Gravity.CENTER);
-        placeholder.setPadding(0, dp(64), 0, dp(64));
-        historyPanel.addView(placeholder);
-
         return scrollView;
     }
 
@@ -1175,13 +1261,15 @@ public class MainActivity extends Activity {
     private void saveSessionLog() {
         try {
             JSONObject payload = new JSONObject();
-            payload.put("date", LocalDate.now().toString());
+            String timestamp = java.time.LocalDateTime.now().toString();
+            payload.put("date", timestamp);
             payload.put("model", model());
             payload.put("server_url", serverUrl());
             payload.put("chain", new JSONArray(chain));
             payload.put("transcript", transcript.toString());
 
-            File file = new File(getFilesDir(), "session_log_" + LocalDate.now() + ".json");
+            String safeName = "session_log_" + timestamp.replace(":", "-").replace(".", "-") + ".json";
+            File file = new File(getFilesDir(), safeName);
             writeText(file, payload.toString(2));
             appendSystem("Saved " + file.getName() + " in the app's local storage.");
         } catch (Exception exception) {
