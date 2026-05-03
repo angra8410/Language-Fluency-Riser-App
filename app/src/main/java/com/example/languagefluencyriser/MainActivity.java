@@ -874,7 +874,41 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final String PREF_LAST_OPENING = "last_opening_prompt";
+    private static final String[] OPENING_PROMPTS = {
+            "Tell me about something useful you learned recently.",
+            "Describe a small challenge you handled this week.",
+            "What is one thing you are looking forward to?",
+            "Tell me about a conversation you had recently.",
+            "Describe something you watched, read, or listened to recently.",
+            "What is one decision you made this week?",
+            "Tell me about something that surprised you recently."
+    };
+
     private String stepPrompt(String step) {
+        if ("Supervisor Opening".equals(step)) {
+            SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+            String lastPrompt = prefs.getString(PREF_LAST_OPENING, "");
+            
+            List<String> available = new ArrayList<>();
+            for (String p : OPENING_PROMPTS) {
+                if (!p.equals(lastPrompt)) {
+                    available.add(p);
+                }
+            }
+            
+            // Fallback if list is empty (shouldn't happen with >1 prompts)
+            if (available.isEmpty()) {
+                available.addAll(Arrays.asList(OPENING_PROMPTS));
+            }
+            
+            String selected = available.get((int) (Math.random() * available.size()));
+            prefs.edit().putString(PREF_LAST_OPENING, selected).apply();
+            
+            return "Start the Supervisor Opening step for today's session.\n"
+                    + "Ask the learner this specific opening question: \"" + selected + "\"\n"
+                    + "Keep it short and wait for their response.";
+        }
         return "Start the " + step + " step for today's session. If you need learner input, ask for it clearly and wait.";
     }
 
