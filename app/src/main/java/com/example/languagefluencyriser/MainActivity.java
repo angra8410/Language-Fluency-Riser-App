@@ -1014,7 +1014,53 @@ public class MainActivity extends Activity {
     }
 
     private void appendAssistant(String step, String text) {
-        appendTranscript(step, text);
+        String cleanText = text;
+        if ("Supervisor Closing".equals(step)) {
+            cleanText = processMemoryUpdate(text);
+        }
+        appendTranscript(step, cleanText);
+    }
+
+    private String processMemoryUpdate(String text) {
+        try {
+            int start = text.indexOf("{");
+            int end = text.lastIndexOf("}");
+            if (start != -1 && end != -1 && end > start) {
+                String jsonStr = text.substring(start, end + 1);
+                JSONObject update = new JSONObject(jsonStr);
+                if (update.has("memory_update")) {
+                    applyMemoryUpdate(update.getJSONObject("memory_update"));
+                    // Return text without the JSON block for a cleaner UI
+                    return (text.substring(0, start) + text.substring(end + 1)).trim();
+                }
+            }
+        } catch (Exception exception) {
+            appendSystem("Memory update failed: " + exception.getMessage());
+        }
+        return text;
+    }
+
+    private void applyMemoryUpdate(JSONObject update) {
+        String[] files = {"learner_profile.json", "progress_tracker.json", "review_queue.json"};
+        for (String fileName : files) {
+            if (update.has(fileName)) {
+                try {
+                    File file = new File(getFilesDir(), fileName);
+                    JSONObject current = new JSONObject(readText(file));
+                    JSONObject newData = update.getJSONObject(fileName);
+                    
+                    // Merge logic: only allow-listed fields or preserve existing
+                    java.util.Iterator<String> keys = newData.keys();
+                    while (keys.hasNext()) {
+                        String key = keys.next();
+                        current.put(key, newData.get(key));
+                    }
+                    
+                    writeText(file, current.toString(2));
+                    appendSystem("Updated " + fileName);
+                } catch (Exception ignored) {}
+            }
+        }
     }
 
     private void appendTranscript(String speaker, String text) {
