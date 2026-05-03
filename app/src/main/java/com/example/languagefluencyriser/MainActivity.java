@@ -109,7 +109,7 @@ public class MainActivity extends Activity {
     private SpeechRecognizer speechRecognizer;
     private ProgressBar progressBar;
     private TextView[] stepViews;
-    private static final String[] STEPS = {"Plan", "Instructions", "Interact", "Review", "Done"};
+    private static final String[] STEPS = {"Opening", "Recall", "Drill", "Error Fix", "Closing"};
     private int chainIndex = -1;
 
     @Override
@@ -118,8 +118,8 @@ public class MainActivity extends Activity {
         ensureMemoryFiles();
         buildUi();
         loadPrefs();
-        updateStepIndicator(0);
-        appendSystem("Welcome! Configure your settings and tap 'Begin Practice' to start.");
+        updateStepIndicator(-1);
+        appendSystem("Configure your session and tap 'Begin New Session' to start.");
     }
 
     @Override
@@ -216,60 +216,63 @@ public class MainActivity extends Activity {
     private View buildHomeTab() {
         mainScrollView = new ScrollView(this);
         mainScrollView.setFillViewport(true);
-        mainScrollView.setBackgroundColor(Color.rgb(245, 247, 250));
+        mainScrollView.setBackgroundColor(Color.rgb(248, 250, 253));
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(20), dp(24), dp(20), dp(40));
+        content.setPadding(dp(20), dp(32), dp(20), dp(48));
         mainScrollView.addView(content);
 
         // Premium Hero Header
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
-        hero.setPadding(dp(4), 0, 0, dp(28));
+        hero.setPadding(dp(4), 0, 0, dp(32));
         
         TextView title = new TextView(this);
-        title.setText("Learning Hub");
-        title.setTextColor(Color.rgb(26, 32, 44));
-        title.setTextSize(30);
-        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        title.setText("Fluency Riser");
+        title.setTextColor(Color.rgb(30, 41, 59));
+        title.setTextSize(34);
+        title.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         hero.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Elevate your English to C1 mastery");
-        subtitle.setTextColor(Color.rgb(113, 128, 150));
+        subtitle.setText("Mastering English C1 Proficiency");
+        subtitle.setTextColor(Color.rgb(100, 116, 139));
         subtitle.setTextSize(16);
         subtitle.setPadding(0, dp(4), 0, 0);
         hero.addView(subtitle);
         content.addView(hero);
 
         // Progress Section - Cleaner and more focused
-        content.addView(sectionHeader("📊 Session Progress"));
+        content.addView(sectionHeader("📊 Session Flow"));
         LinearLayout progressPanel = panel();
+        progressPanel.setPadding(dp(12), dp(20), dp(12), dp(20));
         content.addView(progressPanel);
         
         LinearLayout stepContainer = horizontal();
-        stepContainer.setPadding(0, dp(8), 0, dp(20));
+        stepContainer.setPadding(0, dp(8), 0, dp(16));
         stepViews = new TextView[STEPS.length];
+        String[] stepIcons = {"🚀", "🧠", "🎯", "🛠️", "🏁"};
         for (int i = 0; i < STEPS.length; i++) {
             stepViews[i] = new TextView(this);
-            stepViews[i].setText(STEPS[i]);
-            stepViews[i].setTextSize(10);
+            stepViews[i].setText(stepIcons[i] + "\n" + STEPS[i]);
+            stepViews[i].setTextSize(9);
             stepViews[i].setGravity(Gravity.CENTER);
-            stepViews[i].setPadding(dp(2), dp(6), dp(2), dp(6));
-            stepViews[i].setTypeface(Typeface.DEFAULT_BOLD);
+            stepViews[i].setPadding(0, dp(10), 0, dp(10));
+            stepViews[i].setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            stepViews[i].setLineSpacing(0, 1.2f);
             stepContainer.addView(stepViews[i], weightParams());
         }
         progressPanel.addView(stepContainer);
 
         currentStepView = new TextView(this);
         currentStepView.setText("READY TO START");
-        currentStepView.setTextColor(Color.rgb(63, 81, 181));
-        currentStepView.setTextSize(13);
+        currentStepView.setTextColor(Color.rgb(113, 128, 150));
+        currentStepView.setTextSize(12);
         currentStepView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         currentStepView.setGravity(Gravity.CENTER);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            currentStepView.setLetterSpacing(0.1f);
+            currentStepView.setLetterSpacing(0.05f);
         }
         progressPanel.addView(currentStepView);
 
@@ -425,19 +428,19 @@ public class MainActivity extends Activity {
     private LinearLayout panel() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(16), dp(16), dp(16), dp(16));
+        panel.setPadding(dp(20), dp(20), dp(20), dp(20));
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(Color.WHITE);
-        drawable.setCornerRadius(dp(12));
+        drawable.setCornerRadius(dp(16));
         panel.setBackground(drawable);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            panel.setElevation(dp(2));
+            panel.setElevation(dp(3));
         }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        params.setMargins(0, 0, 0, dp(16));
+        params.setMargins(0, 0, 0, dp(20));
         panel.setLayoutParams(params);
         return panel;
     }
@@ -453,13 +456,13 @@ public class MainActivity extends Activity {
     private TextView sectionHeader(String text) {
         TextView label = new TextView(this);
         label.setText(text.toUpperCase(Locale.US));
-        label.setTextColor(Color.rgb(113, 128, 150));
-        label.setTextSize(11);
-        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setTextColor(Color.rgb(100, 116, 139));
+        label.setTextSize(12);
+        label.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            label.setLetterSpacing(0.08f);
+            label.setLetterSpacing(0.12f);
         }
-        label.setPadding(dp(4), dp(24), 0, dp(12));
+        label.setPadding(dp(4), dp(32), 0, dp(12));
         return label;
     }
 
@@ -543,15 +546,15 @@ public class MainActivity extends Activity {
         button.setText(text);
         button.setAllCaps(false);
         button.setTextColor(Color.WHITE);
-        button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextSize(15);
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setTextSize(16);
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(Color.rgb(63, 81, 181));
-        drawable.setCornerRadius(dp(8));
+        drawable.setCornerRadius(dp(12));
         button.setBackground(drawable);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            button.setElevation(dp(2));
-            button.setStateListAnimator(null); // Remove default button shadow on press for custom feel
+            button.setElevation(dp(4));
+            button.setStateListAnimator(null);
         }
         return button;
     }
@@ -561,12 +564,12 @@ public class MainActivity extends Activity {
         button.setText(text);
         button.setAllCaps(false);
         button.setTextColor(Color.rgb(63, 81, 181));
-        button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextSize(15);
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setTextSize(16);
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(Color.WHITE);
-        drawable.setCornerRadius(dp(8));
-        drawable.setStroke(dp(2), Color.rgb(63, 81, 181));
+        drawable.setCornerRadius(dp(12));
+        drawable.setStroke(dp(1.5f), Color.rgb(226, 232, 240));
         button.setBackground(drawable);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             button.setElevation(0);
@@ -585,19 +588,21 @@ public class MainActivity extends Activity {
         if (stepViews == null) return;
         for (int i = 0; i < stepViews.length; i++) {
             if (i == stepIndex) {
-                stepViews[i].setTextColor(Color.WHITE);
+                stepViews[i].setTextColor(Color.rgb(63, 81, 181));
+                stepViews[i].setAlpha(1.0f);
                 GradientDrawable active = new GradientDrawable();
-                active.setColor(Color.rgb(63, 81, 181));
-                active.setCornerRadius(dp(100)); // Capsule shape
+                active.setColor(Color.rgb(232, 240, 254));
+                active.setCornerRadius(dp(12));
                 stepViews[i].setBackground(active);
             } else {
                 stepViews[i].setTextColor(Color.rgb(160, 174, 192));
+                stepViews[i].setAlpha(0.7f);
                 stepViews[i].setBackground(null);
             }
         }
     }
 
-    private int dp(int value) {
+    private int dp(float value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
@@ -626,7 +631,6 @@ public class MainActivity extends Activity {
         chainIndex = -1;
         transcript.setLength(0);
         transcriptContainer.removeAllViews();
-        appendSystem("Chain: " + String.join(" -> ", chain));
         nextStep();
     }
 
@@ -686,14 +690,17 @@ public class MainActivity extends Activity {
         }
         chainIndex++;
         String step = chain.get(chainIndex);
-        currentStepView.setText("Current step: " + step);
         
-        // Map chain progress to 5-step UI indicator
-        if (chainIndex == 0) updateStepIndicator(0); // Plan
-        else if (chainIndex == 1) updateStepIndicator(1); // Instructions
-        else if (chainIndex < chain.size() - 2) updateStepIndicator(2); // Interact
-        else if (chainIndex < chain.size() - 1) updateStepIndicator(3); // Review
-        else updateStepIndicator(4); // Done
+        int uiIndex = 2; // Default to Drill
+        String uiName = "Drill Phase";
+        
+        if (step.contains("Opening")) { uiIndex = 0; uiName = "Opening"; }
+        else if (step.contains("Recall")) { uiIndex = 1; uiName = "Recall Phase"; }
+        else if (step.contains("Error Analyst")) { uiIndex = 3; uiName = "Error Analysis"; }
+        else if (step.contains("Closing")) { uiIndex = 4; uiName = "Closing Phase"; }
+        
+        currentStepView.setText(uiName.toUpperCase(Locale.US));
+        updateStepIndicator(uiIndex);
 
         updateMicButtonVisibility();
         sendOllama(stepPrompt(step), step);
@@ -708,7 +715,15 @@ public class MainActivity extends Activity {
         String step = currentStep();
         appendUser(text);
         userInput.setText("");
-        updateStepIndicator(2); // Still interacting
+        
+        int uiIndex = 2;
+        if (step.contains("Opening")) uiIndex = 0;
+        else if (step.contains("Recall")) uiIndex = 1;
+        else if (step.contains("Error Analyst")) uiIndex = 3;
+        else if (step.contains("Closing")) uiIndex = 4;
+        
+        updateStepIndicator(uiIndex);
+
         sendOllama("Learner response:\n" + text + "\n\nContinue the current step. Give feedback, then tell me exactly what to do next.", step);
     }
 
@@ -888,62 +903,73 @@ public class MainActivity extends Activity {
         }
         transcript.append("\n\n[").append(speaker).append("]\n").append(text.trim());
         
-        LinearLayout bubble = new LinearLayout(this);
-        bubble.setOrientation(LinearLayout.VERTICAL);
-        bubble.setPadding(dp(12), dp(8), dp(12), dp(8));
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(16), dp(16), dp(16));
         
         GradientDrawable drawable = new GradientDrawable();
         drawable.setCornerRadius(dp(16));
         
         TextView speakerView = new TextView(this);
-        speakerView.setText(speaker.toUpperCase(Locale.US));
+        String speakerLabel = speaker;
+        if (speaker.contains("Supervisor") || speaker.contains("Analyst") || speaker.contains("Coach")) {
+            speakerLabel = "Coach";
+        }
+        speakerView.setText(speakerLabel.toUpperCase(Locale.US));
         speakerView.setTextSize(10);
-        speakerView.setTypeface(Typeface.DEFAULT_BOLD);
-        
-        if ("You".equals(speaker)) {
-            drawable.setColor(Color.rgb(232, 240, 254));
-            speakerView.setTextColor(Color.rgb(25, 103, 210));
-        } else if ("System".equals(speaker)) {
-            drawable.setColor(Color.rgb(241, 243, 244));
-            speakerView.setTextColor(Color.rgb(95, 99, 104));
-        } else {
-            drawable.setColor(Color.WHITE);
-            drawable.setStroke(dp(1), Color.rgb(218, 220, 224));
-            speakerView.setTextColor(Color.rgb(63, 81, 181));
+        speakerView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            speakerView.setLetterSpacing(0.1f);
         }
         
-        bubble.setBackground(drawable);
+        if ("You".equals(speaker)) {
+            drawable.setColor(Color.rgb(240, 244, 255));
+            speakerView.setTextColor(Color.rgb(63, 81, 181));
+        } else if ("System".equals(speaker)) {
+            drawable.setColor(Color.TRANSPARENT);
+            speakerView.setTextColor(Color.rgb(113, 128, 150));
+            speakerView.setText("NOTIFICATION");
+        } else {
+            drawable.setColor(Color.WHITE);
+            drawable.setStroke(dp(1), Color.rgb(238, 242, 247));
+            speakerView.setTextColor(Color.rgb(45, 55, 72));
+        }
+        
+        card.setBackground(drawable);
+        if (!"System".equals(speaker) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            card.setElevation(dp(2));
+        }
         
         TextView contentView = new TextView(this);
         contentView.setText(text.trim());
-        contentView.setTextColor(Color.rgb(32, 33, 36));
-        contentView.setTextSize(15);
+        contentView.setTextColor(Color.rgb(26, 32, 44));
+        contentView.setTextSize(16);
+        contentView.setLineSpacing(dp(2), 1.1f);
         contentView.setTextIsSelectable(true);
         
-        bubble.addView(speakerView);
-        bubble.addView(contentView);
+        card.addView(speakerView);
+        card.addView(contentView);
         
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        params.setMargins(0, 0, 0, dp(12));
+        params.setMargins(0, 0, 0, dp(16));
         
         if ("You".equals(speaker)) {
-            params.gravity = Gravity.END;
-            params.setMargins(dp(48), 0, 0, dp(12));
-            bubble.setGravity(Gravity.END);
+            params.setMargins(dp(32), 0, 0, dp(16));
         } else if ("System".equals(speaker)) {
-            params.gravity = Gravity.CENTER;
-            params.setMargins(dp(24), 0, dp(24), dp(12));
-            bubble.setGravity(Gravity.CENTER);
+            params.setMargins(dp(16), dp(8), dp(16), dp(24));
+            speakerView.setGravity(Gravity.CENTER);
+            contentView.setGravity(Gravity.CENTER);
+            contentView.setTextSize(13);
+            contentView.setTextColor(Color.rgb(113, 128, 150));
+            contentView.setTypeface(Typeface.create("sans-serif", Typeface.ITALIC));
         } else {
-            params.gravity = Gravity.START;
-            params.setMargins(0, 0, dp(48), dp(12));
-            bubble.setGravity(Gravity.START);
+            params.setMargins(0, 0, dp(32), dp(16));
         }
         
-        transcriptContainer.addView(bubble, params);
+        transcriptContainer.addView(card, params);
         
         // Auto-scroll
         mainHandler.postDelayed(() -> {
