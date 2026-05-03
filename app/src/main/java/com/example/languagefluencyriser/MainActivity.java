@@ -62,6 +62,7 @@ public class MainActivity extends Activity {
     private static final String DEFAULT_MODEL = "gemma3:12b";
     private static final String EMULATOR_HOST = "10.0.2.2";
     private static final int MAX_MEMORY_CHARS = 5000;
+    private static final int MAX_RESPONSES_PER_SESSION = 5;
     private static final String CONCISE_COACH_SYSTEM_PROMPT = 
             "You are a concise English speaking coach inside a mobile app.\n\n"
             + "Rules:\n"
@@ -87,6 +88,7 @@ public class MainActivity extends Activity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ArrayList<String> chain = new ArrayList<>();
     private final StringBuilder transcript = new StringBuilder();
+    private int userResponseCount = 0;
 
     private EditText serverUrlField;
     private EditText modelField;
@@ -606,6 +608,9 @@ public class MainActivity extends Activity {
                     userInput.setMinLines(2);
                     userInput.setHint("Type a brief reflection or answer...");
                 }
+                
+                // Final unified call to sync mic visibility and speaking hints
+                updateMicButtonVisibility();
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
         });
@@ -902,6 +907,7 @@ public class MainActivity extends Activity {
 
     private void startChain() {
         savePrefs();
+        userResponseCount = 0;
         chain.clear();
         chain.addAll(buildChain());
         chainIndex = -1;
@@ -988,7 +994,15 @@ public class MainActivity extends Activity {
             setStatus("Type a response first.");
             return;
         }
+
+        if (userResponseCount >= MAX_RESPONSES_PER_SESSION) {
+            appendSystem("Session limit reached (5 responses). Please click 'Next Step' to wrap up.");
+            userInput.setText("");
+            return;
+        }
+
         String step = currentStep();
+        userResponseCount++;
         appendUser(text);
         userInput.setText("");
         
@@ -1000,7 +1014,12 @@ public class MainActivity extends Activity {
         
         updateStepIndicator(uiIndex);
 
-        sendOllama("Learner response:\n" + text + "\n\nContinue the current step. Give feedback, then tell me exactly what to do next.", step);
+        String prompt = "Learner response:\n" + text + "\n\nContinue the current step. Give feedback, then tell me exactly what to do next.";
+        if (userResponseCount >= MAX_RESPONSES_PER_SESSION) {
+            prompt = "Learner response:\n" + text + "\n\nThis is the FINAL interaction. Provide brief feedback, then explicitly tell the learner that the practice session is complete. Do not ask another question.";
+        }
+
+        sendOllama(prompt, step);
     }
 
     private void testConnection() {
@@ -1654,22 +1673,28 @@ public class MainActivity extends Activity {
 
     private void updateMicButtonVisibility() {
         String step = currentStep();
-        String selected = String.valueOf(focusSpinner.getSelectedItem());
-        String effective = "Auto".equals(selected) ? roleForToday() : selected;
+        String effective = getEffectiveFocusArea();
         
         boolean isSpeakingFocus = "Speaking Lab".equals(effective);
         boolean isSpeakingStep = "Speaking Lab".equals(step);
         
-        // Show large mic button if either the mode is Speaking Lab OR it's the specific Speaking Lab step
+        // Show large mic button if either the focus is Speaking Lab OR it's the specific Speaking Lab step
         boolean showMic = isSpeakingFocus || isSpeakingStep;
         
         largeMicButton.setVisibility(showMic ? View.VISIBLE : View.GONE);
         speakingHint.setVisibility(showMic ? View.VISIBLE : View.GONE);
+        micButton.setVisibility(View.GONE); // Always favor large mic in Speaking focus/step
         
-        // Adjust mic button text/icon if needed
         if (showMic) {
             speakingHint.setText(isSpeakingStep ? "🎙️ Adaptive UI: Optimized for speaking practice." : "🎙️ Speaking Focus active.");
         }
+    }
+
+    private String getEffectiveFocusArea() {
+        if (focusSpinner == null) return roleForToday();
+        Object selected = focusSpinner.getSelectedItem();
+        String selectedStr = (selected != null) ? String.valueOf(selected) : "Auto";
+        return "Auto".equals(selectedStr) ? roleForToday() : selectedStr;
     }
 
     private void updateFocusCardsUi(int selectedIndex) {
