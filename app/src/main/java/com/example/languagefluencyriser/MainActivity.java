@@ -476,20 +476,6 @@ public class MainActivity extends Activity {
         autoFocusInfo.setVisibility(View.GONE);
         modePanel.addView(autoFocusInfo);
         
-        focusSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
-                String selected = String.valueOf(focusSpinner.getSelectedItem());
-                if ("Auto".equals(selected)) {
-                    autoFocusInfo.setText("Auto selected: " + roleForToday());
-                    autoFocusInfo.setVisibility(View.VISIBLE);
-                } else {
-                    autoFocusInfo.setVisibility(View.GONE);
-                }
-            }
-            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-        });
-        
         modePanel.addView(label("Session Length"));
         dayTypeSpinner = spinner(Arrays.asList("Short day", "Full day"));
         modePanel.addView(dayTypeSpinner);
@@ -622,6 +608,13 @@ public class MainActivity extends Activity {
                 }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+        
+        // Initial manual trigger to apply the adaptive UI for the starting selection (Auto)
+        focusSpinner.post(() -> {
+            if (focusSpinner.getOnItemSelectedListener() != null) {
+                focusSpinner.getOnItemSelectedListener().onItemSelected(focusSpinner, null, 0, 0);
+            }
         });
 
         // Secondary Actions - Tucked away but accessible
@@ -1661,14 +1654,22 @@ public class MainActivity extends Activity {
 
     private void updateMicButtonVisibility() {
         String step = currentStep();
+        String selected = String.valueOf(focusSpinner.getSelectedItem());
+        String effective = "Auto".equals(selected) ? roleForToday() : selected;
+        
+        boolean isSpeakingFocus = "Speaking Lab".equals(effective);
         boolean isSpeakingStep = "Speaking Lab".equals(step);
         
-        // Always hide standard mic button in favor of large one if in Speaking Lab focus
-        micButton.setVisibility(isSpeakingStep ? View.GONE : View.GONE); 
+        // Show large mic button if either the mode is Speaking Lab OR it's the specific Speaking Lab step
+        boolean showMic = isSpeakingFocus || isSpeakingStep;
         
-        // Show/hide large button and hint only during the actual Speaking Lab step
-        largeMicButton.setVisibility(isSpeakingStep ? View.VISIBLE : View.GONE);
-        speakingHint.setVisibility(isSpeakingStep ? View.VISIBLE : View.GONE);
+        largeMicButton.setVisibility(showMic ? View.VISIBLE : View.GONE);
+        speakingHint.setVisibility(showMic ? View.VISIBLE : View.GONE);
+        
+        // Adjust mic button text/icon if needed
+        if (showMic) {
+            speakingHint.setText(isSpeakingStep ? "🎙️ Adaptive UI: Optimized for speaking practice." : "🎙️ Speaking Focus active.");
+        }
     }
 
     private void updateFocusCardsUi(int selectedIndex) {
