@@ -108,6 +108,8 @@ public class MainActivity extends Activity {
     private Button sendButton;
     private Button testButton;
     private Button micButton;
+    private Button largeMicButton;
+    private TextView speakingHint;
     private SpeechRecognizer speechRecognizer;
     private ProgressBar progressBar;
     private TextView[] stepViews;
@@ -450,8 +452,33 @@ public class MainActivity extends Activity {
         writingHelper.setVisibility(View.GONE);
         inputPanel.addView(writingHelper);
 
+        speakingHint = new TextView(this);
+        speakingHint.setText("Try to answer in 45 seconds.");
+        speakingHint.setTextColor(Color.rgb(231, 76, 60));
+        speakingHint.setTextSize(13);
+        speakingHint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        speakingHint.setPadding(dp(4), 0, 0, dp(8));
+        speakingHint.setVisibility(View.GONE);
+        inputPanel.addView(speakingHint);
+
         userInput = multiLineField("Share your thoughts or complete the task...");
         inputPanel.addView(userInput);
+
+        largeMicButton = new Button(this);
+        largeMicButton.setText("🎤 Tap to Speak");
+        largeMicButton.setAllCaps(false);
+        largeMicButton.setTextColor(Color.WHITE);
+        largeMicButton.setTextSize(18);
+        largeMicButton.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        GradientDrawable largeMicDrawable = new GradientDrawable();
+        largeMicDrawable.setColor(Color.rgb(231, 76, 60));
+        largeMicDrawable.setCornerRadius(dp(16));
+        largeMicButton.setBackground(largeMicDrawable);
+        largeMicButton.setVisibility(View.GONE);
+        LinearLayout.LayoutParams largeMicParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(72));
+        largeMicParams.setMargins(0, dp(8), 0, dp(16));
+        inputPanel.addView(largeMicButton, largeMicParams);
 
         LinearLayout inputActions = horizontal();
         micButton = secondaryButton("🎤 Record");
@@ -485,6 +512,16 @@ public class MainActivity extends Activity {
                     userInput.setMinLines(4);
                     inputPanel.setPadding(dp(20), dp(20), dp(20), dp(20));
                 }
+                
+                // Speaking Lab UI enhancements
+                if ("Speaking Lab".equals(effective)) {
+                    speakingHint.setVisibility(View.VISIBLE);
+                    largeMicButton.setVisibility(View.VISIBLE);
+                    micButton.setVisibility(View.GONE);
+                } else {
+                    speakingHint.setVisibility(View.GONE);
+                    largeMicButton.setVisibility(View.GONE);
+                }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
         });
@@ -511,6 +548,7 @@ public class MainActivity extends Activity {
         saveButton.setOnClickListener(v -> saveSessionLog());
         sendButton.setOnClickListener(v -> sendCurrentInput());
         micButton.setOnClickListener(v -> toggleMic());
+        largeMicButton.setOnClickListener(v -> toggleMic());
 
         return mainScrollView;
     }
@@ -1211,6 +1249,7 @@ public class MainActivity extends Activity {
         sendButton.setEnabled(!busy);
         testButton.setEnabled(!busy);
         if (micButton != null) micButton.setEnabled(!busy);
+        if (largeMicButton != null) largeMicButton.setEnabled(!busy);
         if (progressBar != null) progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
     }
 
@@ -1431,7 +1470,7 @@ public class MainActivity extends Activity {
                 @Override public void onEndOfSpeech() { setStatus("Processing voice..."); }
                 @Override public void onError(int error) {
                     setStatus("Mic Error: " + error);
-                    micButton.setText("🎤 Record Voice");
+                    updateMicButtonsText("🎤 Record Voice");
                 }
                 @Override public void onResults(Bundle results) {
                     ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
@@ -1439,11 +1478,27 @@ public class MainActivity extends Activity {
                         userInput.setText(matches.get(0));
                     }
                     setStatus("Ready.");
-                    micButton.setText("🎤 Record Voice");
+                    updateMicButtonsText("🎤 Record Voice");
                 }
                 @Override public void onPartialResults(Bundle partialResults) {}
                 @Override public void onEvent(int eventType, Bundle params) {}
             });
+        }
+    }
+
+    private void updateMicButtonsText(String text) {
+        if (micButton != null) micButton.setText(text);
+        if (largeMicButton != null) {
+            if (text.contains("Stop")) {
+                largeMicButton.setText("🛑 Stop Recording");
+                largeMicButton.setBackgroundColor(Color.rgb(44, 62, 80));
+            } else {
+                largeMicButton.setText("🎤 Tap to Speak");
+                GradientDrawable largeMicDrawable = new GradientDrawable();
+                largeMicDrawable.setColor(Color.rgb(231, 76, 60));
+                largeMicDrawable.setCornerRadius(dp(16));
+                largeMicButton.setBackground(largeMicDrawable);
+            }
         }
     }
 
@@ -1452,7 +1507,7 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 100);
             return;
         }
-        if (micButton.getText().toString().contains("Record")) {
+        if (micButton.getText().toString().contains("Record") || largeMicButton.getText().toString().contains("Speak")) {
             startListening();
         } else {
             stopListening();
@@ -1465,20 +1520,23 @@ public class MainActivity extends Activity {
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
         speechRecognizer.startListening(intent);
-        micButton.setText("🛑 Stop Recording");
+        updateMicButtonsText("🛑 Stop Recording");
     }
 
     private void stopListening() {
         if (speechRecognizer != null) speechRecognizer.stopListening();
-        micButton.setText("🎤 Record Voice");
+        updateMicButtonsText("🎤 Record Voice");
     }
 
     private void updateMicButtonVisibility() {
         String step = currentStep();
-        if ("Speaking Lab".equals(step)) {
-            micButton.setVisibility(View.VISIBLE);
-        } else {
-            micButton.setVisibility(View.GONE);
-        }
+        boolean isSpeakingStep = "Speaking Lab".equals(step);
+        
+        // Always hide standard mic button in favor of large one if in Speaking Lab focus
+        micButton.setVisibility(isSpeakingStep ? View.GONE : View.GONE); 
+        
+        // Show/hide large button and hint only during the actual Speaking Lab step
+        largeMicButton.setVisibility(isSpeakingStep ? View.VISIBLE : View.GONE);
+        speakingHint.setVisibility(isSpeakingStep ? View.VISIBLE : View.GONE);
     }
 }
