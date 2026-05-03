@@ -462,10 +462,10 @@ public class MainActivity extends Activity {
 
         // Input Section
         content.addView(sectionHeader("✍️ Your Response"));
-        LinearLayout inputPanel = panel();
+        final LinearLayout inputPanel = panel();
         content.addView(inputPanel);
         
-        TextView writingHelper = new TextView(this);
+        final TextView writingHelper = new TextView(this);
         writingHelper.setText("Write your response below.");
         writingHelper.setTextColor(Color.rgb(63, 81, 181));
         writingHelper.setTextSize(13);
@@ -519,7 +519,7 @@ public class MainActivity extends Activity {
         inputActions.addView(sendButton, weightParams());
         inputPanel.addView(inputActions);
 
-        // Update Focus Spinner listener to handle Writing Studio UI
+        // Update Focus Spinner listener to handle Adaptive UI
         focusSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
@@ -527,7 +527,7 @@ public class MainActivity extends Activity {
                 String effective = "Auto".equals(selected) ? roleForToday() : selected;
                 
                 if ("Auto".equals(selected)) {
-                    autoFocusInfo.setText("Auto selected: " + effective);
+                    autoFocusInfo.setText("★ Adaptive: " + effective);
                     autoFocusInfo.setVisibility(View.VISIBLE);
                 } else {
                     autoFocusInfo.setVisibility(View.GONE);
@@ -539,19 +539,26 @@ public class MainActivity extends Activity {
                 immersionHint.setVisibility(View.GONE);
                 largeMicButton.setVisibility(View.GONE);
                 userInput.setMinLines(4);
+                userInput.setHint("Share your thoughts or complete the task...");
                 inputPanel.setPadding(dp(20), dp(20), dp(20), dp(20));
 
                 if ("Writing Studio".equals(effective)) {
+                    writingHelper.setText("📝 Adaptive UI: Optimized for long-form writing.");
                     writingHelper.setVisibility(View.VISIBLE);
-                    userInput.setMinLines(8);
+                    userInput.setMinLines(10);
+                    userInput.setHint("Start writing your essay or report here...");
                     inputPanel.setPadding(dp(20), dp(24), dp(20), dp(24));
                 } else if ("Speaking Lab".equals(effective)) {
+                    speakingHint.setText("🎙️ Adaptive UI: Optimized for speaking practice.");
                     speakingHint.setVisibility(View.VISIBLE);
                     largeMicButton.setVisibility(View.VISIBLE);
+                    userInput.setHint("Speak or type your response...");
                     micButton.setVisibility(View.GONE);
                 } else if ("Input Immersion".equals(effective)) {
+                    immersionHint.setText("📖 Adaptive UI: Optimized for reading & listening.");
                     immersionHint.setVisibility(View.VISIBLE);
-                    userInput.setMinLines(2); // Less space needed for responses usually
+                    userInput.setMinLines(2);
+                    userInput.setHint("Type a brief reflection or answer...");
                 }
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
