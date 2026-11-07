@@ -151,6 +151,8 @@ public class MainActivity extends Activity {
     private TextView immersionHint;
     private SpeechRecognizer speechRecognizer;
     private boolean isListening = false;
+    private boolean voiceMode = false;
+    private static final String PREF_VOICE_MODE = "voice_mode";
     private TextToSpeech tts;
     private ProgressBar progressBar;
     private TextView[] stepViews;
@@ -176,8 +178,26 @@ public class MainActivity extends Activity {
                 tts = null;
             } else {
                 tts.setLanguage(Locale.US);
+                tts.setSpeechRate(0.95f); // a touch slower than default, for a learner
+                tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
+                    @Override public void onStart(String utteranceId) {}
+                    @Override public void onDone(String utteranceId) {
+                        if (UTTERANCE_AUTO_LISTEN.equals(utteranceId)) mainHandler.post(() -> autoListen());
+                    }
+                    @Override public void onError(String utteranceId) {
+                        if (UTTERANCE_AUTO_LISTEN.equals(utteranceId)) mainHandler.post(() -> autoListen());
+                    }
+                });
             }
         });
+    }
+
+    @Override
+    protected void onPause() {
+        // Never keep the mic or voice running while the app is in the background
+        if (tts != null) tts.stop();
+        if (isListening) stopListening();
+        super.onPause();
     }
 
     @Override
@@ -558,6 +578,18 @@ public class MainActivity extends Activity {
         modePanel.addView(label("Session Length"));
         dayTypeSpinner = spinner(Arrays.asList("Short day", "Full day"));
         modePanel.addView(dayTypeSpinner);
+
+        android.widget.Switch voiceSwitch = new android.widget.Switch(this);
+        voiceSwitch.setText("🎧 Hands-free voice mode");
+        voiceSwitch.setTextColor(COLOR_TEXT_PRIMARY);
+        voiceSwitch.setTextSize(15);
+        voiceSwitch.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        voiceSwitch.setPadding(0, dp(16), 0, dp(4));
+        voiceMode = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_VOICE_MODE, false);
+        voiceSwitch.setChecked(voiceMode);
+        voiceSwitch.setOnCheckedChangeListener((b, checked) -> setVoiceMode(checked));
+        modePanel.addView(voiceSwitch);
+        modePanel.addView(hintText("The coach speaks, then the mic opens automatically. Your answer is sent when you stop talking."));
 
         // Main Action - Dominant CTA
         LinearLayout startContainer = new LinearLayout(this);
@@ -1397,8 +1429,9 @@ public class MainActivity extends Activity {
                         // JSONObject.put only throws for null keys / non-finite numbers.
                     }
                     JSONObject structured = jsonMode ? parseCoachJson(response) : null;
+                    String shown;
                     if (structured != null) {
-                        appendAssistant(step, structured.optString("message", "").trim());
+                        shown = appendAssistant(step, structured.optString("message", "").trim());
                         JSONArray corrections = structured.optJSONArray("corrections");
                         if (corrections != null && corrections.length() > 0) {
                             appendCorrections(corrections);
@@ -1409,10 +1442,13 @@ public class MainActivity extends Activity {
                             applyReviewResults(reviews);
                         }
                     } else {
-                        appendAssistant(step, response); // plain-text step, or the model ignored the JSON format
+                        shown = appendAssistant(step, response); // plain-text step, or the model ignored the JSON format
                     }
                     setStatus("Ready.");
                     setBusy(false);
+                    if (voiceMode) {
+                        speakCoach(shown, true); // hands-free: speak, then open the mic when done
+                    }
                 });
             } catch (Exception exception) {
                 mainHandler.post(() -> {
@@ -1860,12 +1896,64 @@ public class MainActivity extends Activity {
         transcriptContainer.addView(card, params);
     }
 
-    private void appendAssistant(String step, String text) {
+    /** Shows a coach reply and returns the text actually displayed (closing JSON removed). */
+    private String appendAssistant(String step, String text) {
         String cleanText = text;
         if ("Supervisor Closing".equals(step)) {
             cleanText = processMemoryUpdate(text);
         }
         appendTranscript(step, cleanText);
+        return cleanText;
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Hands-free voice mode: the coach speaks, then the mic opens; the answer is sent on silence.
+    // ---------------------------------------------------------------------------------------
+    private static final String UTTERANCE_AUTO_LISTEN = "coach_auto_listen";
+    private static final String UTTERANCE_MANUAL = "coach";
+
+    private void speakCoach(String text, boolean thenListen) {
+        if (tts == null || text == null) {
+            if (thenListen) autoListen();
+            return;
+        }
+        // Strip markdown so the voice doesn't read out asterisks and hashes
+        String spoken = text.replaceAll("[*#_`>]", "").replaceAll("\\s+", " ").trim();
+        if (spoken.isEmpty()) {
+            if (thenListen) autoListen();
+            return;
+        }
+        tts.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, thenListen ? UTTERANCE_AUTO_LISTEN : UTTERANCE_MANUAL);
+    }
+
+    /** Opens the mic if the session is waiting for an answer. Never loops after a failed recognition. */
+    private void autoListen() {
+        if (!voiceMode || isListening || isFinishing()) return;
+        boolean stepOpen = chainIndex >= 0 && chainIndex < chain.size();
+        if (!stepOpen) return;
+        if (userResponseCount >= MAX_RESPONSES_PER_STEP) {
+            setStatus("Step complete. Tap 'Next Step' to continue.");
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            setStatus("Allow microphone access to use voice mode.");
+            return;
+        }
+        startListening();
+    }
+
+    private void setVoiceMode(boolean enabled) {
+        voiceMode = enabled;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_VOICE_MODE, enabled).apply();
+        if (enabled) {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 100);
+            }
+        } else {
+            if (tts != null) tts.stop();
+            if (isListening) stopListening();
+        }
+        updateMicButtonVisibility();
     }
 
     private String processMemoryUpdate(String text) {
@@ -2079,7 +2167,7 @@ public class MainActivity extends Activity {
             listenButton.setTextSize(isImmersion ? 16 : 13);
             listenButton.setOnClickListener(v -> {
                 if (tts != null) {
-                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "coach");
+                    speakCoach(text, false);
                 } else {
                     setStatus("Text-to-speech is not ready yet.");
                 }
@@ -2416,13 +2504,23 @@ public class MainActivity extends Activity {
                 @Override public void onResults(Bundle results) {
                     isListening = false;
                     ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                    if (matches != null && !matches.isEmpty()) {
-                        userInput.setText(matches.get(0));
+                    String heard = (matches != null && !matches.isEmpty()) ? matches.get(0).trim() : "";
+                    if (!heard.isEmpty()) {
+                        userInput.setText(heard);
                     }
                     setStatus("Ready.");
                     updateMicButtonsText("🎤 Record Voice");
+                    if (voiceMode && !heard.isEmpty()) {
+                        sendCurrentInput(); // hands-free: send as soon as the learner stops talking
+                    }
                 }
-                @Override public void onPartialResults(Bundle partialResults) {}
+                @Override public void onPartialResults(Bundle partialResults) {
+                    // Show words live while the learner is speaking
+                    ArrayList<String> partial = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (partial != null && !partial.isEmpty() && !partial.get(0).trim().isEmpty()) {
+                        userInput.setText(partial.get(0));
+                    }
+                }
                 @Override public void onEvent(int eventType, Bundle params) {}
             });
         }
@@ -2469,6 +2567,12 @@ public class MainActivity extends Activity {
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         // The learner practises English, so recognise English even on a Spanish-language phone.
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US");
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        // Give a learner time to think mid-sentence (some recognizers ignore these hints)
+        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500);
+        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000);
+        if (tts != null) tts.stop(); // don't let the coach's voice be transcribed
+        if (voiceMode) userInput.setText("");
         isListening = true;
         speechRecognizer.startListening(intent);
         updateMicButtonsText("🛑 Stop Recording");
@@ -2488,7 +2592,7 @@ public class MainActivity extends Activity {
         boolean isSpeakingStep = "Speaking Lab".equals(step);
         
         // Show large mic button if either the focus is Speaking Lab OR it's the specific Speaking Lab step
-        boolean showMic = isSpeakingFocus || isSpeakingStep;
+        boolean showMic = isSpeakingFocus || isSpeakingStep || voiceMode;
         
         largeMicButton.setVisibility(showMic ? View.VISIBLE : View.GONE);
         speakingHint.setVisibility(showMic ? View.VISIBLE : View.GONE);
