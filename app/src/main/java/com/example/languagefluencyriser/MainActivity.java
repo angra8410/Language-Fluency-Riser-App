@@ -646,11 +646,8 @@ public class MainActivity extends Activity {
         // Focus chips
         LinearLayout focusSection = vertical(dp(10));
         focusSection.addView(text("Change focus", 13, COLOR_TEXT_SECONDARY, true));
-        android.widget.HorizontalScrollView chipScroll = new android.widget.HorizontalScrollView(this);
-        chipScroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout chipRow = new LinearLayout(this);
-        chipRow.setOrientation(LinearLayout.HORIZONTAL);
-        chipScroll.addView(chipRow);
+        // Chips wrap onto a second line instead of hiding off-screen
+        FlowLayout chipRow = new FlowLayout(this, dp(8), dp(8));
         focusChips = new TextView[FOCUS_KEYS.length];
         for (int i = 0; i < FOCUS_KEYS.length; i++) {
             final String key = FOCUS_KEYS[i];
@@ -664,12 +661,10 @@ public class MainActivity extends Activity {
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_FOCUS, key).apply();
                 refreshToday();
             });
-            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40));
-            chipParams.setMargins(0, 0, dp(8), 0);
-            chipRow.addView(chip, chipParams);
+            chipRow.addView(chip, new android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)));
             focusChips[i] = chip;
         }
-        focusSection.addView(chipScroll);
+        focusSection.addView(chipRow, matchWrap());
         content.addView(focusSection);
 
         // Options: voice mode + session length
