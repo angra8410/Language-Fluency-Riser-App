@@ -1,10 +1,10 @@
 <resources>
-    <color name="surface">#F7F8FA</color>
-    <color name="panel">#FFFFFF</color>
-    <color name="ink">#17202A</color>
-    <color name="muted">#5D6673</color>
-    <color name="line">#D6DAE1</color>
-    <color name="primary">#126C5A</color>
-    <color name="primary_dark">#0E5144</color>
-    <color name="accent">#B25E2B</color>
+    <color name="background">#0B1020</color>
+    <color name="bar">#0F1426</color>
+    <color name="surface">#151B2E</color>
+    <color name="ink">#F3F4F6</color>
+    <color name="muted">#A3ACC2</color>
+    <color name="line">#252D45</color>
+    <color name="primary">#818CF8</color>
+    <color name="accent">#FBBF24</color>
 </resources>
