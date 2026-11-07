@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
     private static final String DEFAULT_MODEL = "gemma3:12b";
     private static final String EMULATOR_HOST = "10.0.2.2";
     private static final int MAX_MEMORY_CHARS = 5000;
-    private static final int MAX_RESPONSES_PER_SESSION = 5;
+    private static final int MAX_RESPONSES_PER_STEP = 5;
     private static final String GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
     private static final String CLOSING_STEP = "Supervisor Closing";
     // Output budgets: normal coaching turns are short; the closing step must fit a memory_update JSON.
@@ -147,6 +147,7 @@ public class MainActivity extends Activity {
     private TextView speakingHint;
     private TextView immersionHint;
     private SpeechRecognizer speechRecognizer;
+    private boolean isListening = false;
     private TextToSpeech tts;
     private ProgressBar progressBar;
     private TextView[] stepViews;
@@ -319,7 +320,8 @@ public class MainActivity extends Activity {
                 logPanel.setFocusable(true);
                 
                 TextView dateView = new TextView(this);
-                dateView.setText(date.replace("T", " ").substring(0, 16));
+                String prettyDate = date.replace("T", " ");
+                dateView.setText(prettyDate.length() > 16 ? prettyDate.substring(0, 16) : prettyDate);
                 dateView.setTextColor(COLOR_TEXT_PRIMARY);
                 dateView.setTextSize(16);
                 dateView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
@@ -340,34 +342,33 @@ public class MainActivity extends Activity {
                 previewView.setTextSize(14);
                 logPanel.addView(previewView);
                 
+                // Full transcript, expanded in place so the live session on Home is never touched
+                TextView fullView = new TextView(this);
+                fullView.setText(transcriptStr.trim());
+                fullView.setTextColor(COLOR_TEXT_PRIMARY);
+                fullView.setTextSize(14);
+                fullView.setLineSpacing(dp(2), 1.1f);
+                fullView.setTextIsSelectable(true);
+                fullView.setPadding(0, dp(12), 0, 0);
+                fullView.setVisibility(View.GONE);
+                logPanel.addView(fullView);
+
                 logPanel.setOnClickListener(v -> {
-                    // Show full transcript in the main interaction view
-                    appendSystem("Viewing history from " + date);
-                    transcript.setLength(0);
-                    transcriptContainer.removeAllViews();
-                    
-                    // Re-parse transcript into UI components
-                    String raw = transcriptStr;
-                    // Standardize separators for parsing
-                    if (raw.startsWith("\n\n[")) raw = raw.substring(2);
-                    String[] parts = raw.split("\n\n\\[");
-                    
-                    for (String part : parts) {
-                        if (part.isEmpty()) continue;
-                        int endBracket = part.indexOf("]");
-                        if (endBracket > 0) {
-                            String speaker = part.substring(0, endBracket);
-                            String text = part.substring(endBracket + 1).trim();
-                            appendTranscript(speaker, text);
-                        }
-                    }
-                    
-                    switchTab(0);
-                    mainScrollView.postDelayed(() -> mainScrollView.smoothScrollTo(0, 0), 100);
+                    boolean expand = fullView.getVisibility() != View.VISIBLE;
+                    fullView.setVisibility(expand ? View.VISIBLE : View.GONE);
+                    previewView.setVisibility(expand ? View.GONE : View.VISIBLE);
                 });
-                
+
                 historyContainer.addView(logPanel);
-            } catch (Exception ignored) {}
+            } catch (Exception exception) {
+                LinearLayout errorPanel = panel();
+                TextView errorText = new TextView(this);
+                errorText.setText("Could not read " + log.getName());
+                errorText.setTextColor(COLOR_TEXT_SECONDARY);
+                errorText.setTextSize(13);
+                errorPanel.addView(errorText);
+                historyContainer.addView(errorPanel);
+            }
         }
     }
 
@@ -999,7 +1000,7 @@ public class MainActivity extends Activity {
 
     private void loadPrefs() {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String serviceType = prefs.getString(PREF_SERVICE_TYPE, "Gemini");
+        String serviceType = prefs.getString(PREF_SERVICE_TYPE, "Ollama");
         int pos = "Gemini".equalsIgnoreCase(serviceType) ? 1 : 0;
         serviceTypeSpinner.setSelection(pos);
 
@@ -1094,6 +1095,7 @@ public class MainActivity extends Activity {
             return;
         }
         chainIndex++;
+        userResponseCount = 0; // the response limit applies per step
         String step = chain.get(chainIndex);
         
         int uiIndex = 2; // Default to practice phase
@@ -1199,9 +1201,9 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if (userResponseCount >= MAX_RESPONSES_PER_SESSION) {
-            appendSystem("Session limit reached (5 responses). Please click 'Next Step' to wrap up.");
-            userInput.setText("");
+        if (userResponseCount >= MAX_RESPONSES_PER_STEP) {
+            // Keep the typed text so it isn't lost; the learner can send it in the next step.
+            appendSystem("This step is complete (" + MAX_RESPONSES_PER_STEP + " responses). Tap 'Next Step' to continue.");
             return;
         }
 
@@ -1219,8 +1221,8 @@ public class MainActivity extends Activity {
         updateStepIndicator(uiIndex);
 
         String prompt = "Learner response:\n" + text + "\n\nContinue the current step. Give feedback, then tell me exactly what to do next.";
-        if (userResponseCount >= MAX_RESPONSES_PER_SESSION) {
-            prompt = "Learner response:\n" + text + "\n\nThis is the FINAL interaction. Provide brief feedback, then explicitly tell the learner that the practice session is complete. Do not ask another question.";
+        if (userResponseCount >= MAX_RESPONSES_PER_STEP) {
+            prompt = "Learner response:\n" + text + "\n\nThis is the FINAL interaction for this step. Provide brief feedback, then tell the learner this step is complete and to tap 'Next Step'. Do not ask another question.";
         }
 
         sendOllama(prompt, step);
@@ -2139,10 +2141,14 @@ public class MainActivity extends Activity {
                 @Override public void onBufferReceived(byte[] buffer) {}
                 @Override public void onEndOfSpeech() { setStatus("Processing voice..."); }
                 @Override public void onError(int error) {
-                    setStatus("Mic Error: " + error);
+                    isListening = false;
+                    setStatus(error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                            ? "Didn't catch that. Tap the mic and try again."
+                            : "Mic Error: " + error);
                     updateMicButtonsText("🎤 Record Voice");
                 }
                 @Override public void onResults(Bundle results) {
+                    isListening = false;
                     ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                     if (matches != null && !matches.isEmpty()) {
                         userInput.setText(matches.get(0));
@@ -2180,23 +2186,30 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 100);
             return;
         }
-        if (micButton.getText().toString().contains("Record") || largeMicButton.getText().toString().contains("Speak")) {
-            startListening();
-        } else {
+        if (isListening) {
             stopListening();
+        } else {
+            startListening();
         }
     }
 
     private void startListening() {
-        if (speechRecognizer == null) return;
+        if (speechRecognizer == null) {
+            setStatus("Speech recognition is not available on this device.");
+            appendSystem("Speech recognition is not available on this device. Please type your response.");
+            return;
+        }
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
+        // The learner practises English, so recognise English even on a Spanish-language phone.
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US");
+        isListening = true;
         speechRecognizer.startListening(intent);
         updateMicButtonsText("🛑 Stop Recording");
     }
 
     private void stopListening() {
+        isListening = false;
         if (speechRecognizer != null) speechRecognizer.stopListening();
         updateMicButtonsText("🎤 Record Voice");
     }
