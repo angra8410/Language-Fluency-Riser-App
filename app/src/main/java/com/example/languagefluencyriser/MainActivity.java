@@ -70,7 +70,9 @@ public class MainActivity extends Activity {
     // Output budgets: normal coaching turns are short; the closing step must fit a memory_update JSON.
     private static final int OLLAMA_TOKENS_DEFAULT = 200;
     private static final int OLLAMA_TOKENS_CLOSING = 900;
+    private static final int OLLAMA_TOKENS_FEEDBACK = 450; // JSON reply + corrections
     private static final int GEMINI_TOKENS_DEFAULT = 1024;
+    private static final int GEMINI_TOKENS_FEEDBACK = 2048;
     private static final int GEMINI_TOKENS_CLOSING = 4096;
 
     // Premium Dark Theme Color Palette Tokens
@@ -132,6 +134,7 @@ public class MainActivity extends Activity {
     private TextView currentStepView;
     private TextView currentStepDescView;
     private TextView autoFocusInfo;
+    private TextView deckStatsView;
     private Spinner focusSpinner;
     private String selectedFocusArea = "Auto";
     private LinearLayout[] focusCards;
@@ -161,6 +164,7 @@ public class MainActivity extends Activity {
         buildUi();
         loadPrefs();
         updateStepIndicator(-1);
+        refreshDeckStats();
         initTts();
         appendSystem("Configure your session and tap 'Begin New Session' to start.");
     }
@@ -407,6 +411,12 @@ public class MainActivity extends Activity {
         subtitle.setTextSize(16);
         subtitle.setPadding(0, dp(4), 0, 0);
         hero.addView(subtitle);
+
+        deckStatsView = new TextView(this);
+        deckStatsView.setTextColor(COLOR_TEXT_SECONDARY);
+        deckStatsView.setTextSize(13);
+        deckStatsView.setPadding(0, dp(12), 0, 0);
+        hero.addView(deckStatsView);
         content.addView(hero);
 
         // Progress Section - Cleaner and more focused
@@ -1134,7 +1144,7 @@ public class MainActivity extends Activity {
         syncFocusUiWithStep(step);
         
         updateMicButtonVisibility();
-        sendOllama(stepPrompt(step), step);
+        sendOllama(stepPrompt(step), step, false);
     }
 
     private void syncFocusUiWithStep(String step) {
@@ -1225,7 +1235,23 @@ public class MainActivity extends Activity {
             prompt = "Learner response:\n" + text + "\n\nThis is the FINAL interaction for this step. Provide brief feedback, then tell the learner this step is complete and to tap 'Next Step'. Do not ask another question.";
         }
 
-        sendOllama(prompt, step);
+        sendOllama(prompt + feedbackJsonInstructions(step), step, true);
+    }
+
+    /** Asks the model for a structured reply so corrections can be saved to the review deck. */
+    private String feedbackJsonInstructions(String step) {
+        String reviewPart = step.contains("Recall")
+                ? ",\n  \"review_results\": [{\"id\": \"review item id you just quizzed\", \"correct\": true}]"
+                : "";
+        return "\n\nRespond ONLY with a JSON object, no markdown:\n"
+                + "{\n"
+                + "  \"message\": \"what you say to the learner: brief feedback, the natural version, then your next question (max 60 words)\",\n"
+                + "  \"corrections\": [{\"original\": \"the learner's exact wrong words\", \"corrected\": \"the natural C1 version\", "
+                + "\"explanation\": \"why, max 12 words\", \"category\": \"grammar|vocabulary|collocation|word order|register|preposition\"}]"
+                + reviewPart + "\n"
+                + "}\n"
+                + "Only list genuine errors or clearly unnatural phrasing (max 3). Use an empty array if the answer was correct."
+                + (reviewPart.isEmpty() ? "" : " In review_results, grade only the review items the learner just answered.");
     }
 
     private void testConnection() {
@@ -1327,7 +1353,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void sendOllama(String userPrompt, String step) {
+    private void sendOllama(String userPrompt, String step, boolean jsonMode) {
         boolean isGemini = (serviceTypeSpinner != null && serviceTypeSpinner.getSelectedItemPosition() == 1);
         
         if (!isGemini) {
@@ -1353,14 +1379,16 @@ public class MainActivity extends Activity {
         messages.add(userTurn);
         final String systemPrompt = systemPromptForStep(step);
         final boolean closing = CLOSING_STEP.equals(step);
+        final int geminiTokens = closing ? GEMINI_TOKENS_CLOSING : jsonMode ? GEMINI_TOKENS_FEEDBACK : GEMINI_TOKENS_DEFAULT;
+        final int ollamaTokens = closing ? OLLAMA_TOKENS_CLOSING : jsonMode ? OLLAMA_TOKENS_FEEDBACK : OLLAMA_TOKENS_DEFAULT;
 
         setBusy(true);
         setStatus(isGemini ? "Contacting Gemini..." : "Contacting Ollama...");
         executor.execute(() -> {
             try {
                 String response = isGemini
-                        ? postGemini(systemPrompt, messages, closing ? GEMINI_TOKENS_CLOSING : GEMINI_TOKENS_DEFAULT)
-                        : postChat(systemPrompt, messages, closing ? OLLAMA_TOKENS_CLOSING : OLLAMA_TOKENS_DEFAULT);
+                        ? postGemini(systemPrompt, messages, geminiTokens, jsonMode)
+                        : postChat(systemPrompt, messages, ollamaTokens, jsonMode);
                 mainHandler.post(() -> {
                     conversation.add(userTurn);
                     try {
@@ -1368,7 +1396,21 @@ public class MainActivity extends Activity {
                     } catch (Exception ignored) {
                         // JSONObject.put only throws for null keys / non-finite numbers.
                     }
-                    appendAssistant(step, response);
+                    JSONObject structured = jsonMode ? parseCoachJson(response) : null;
+                    if (structured != null) {
+                        appendAssistant(step, structured.optString("message", "").trim());
+                        JSONArray corrections = structured.optJSONArray("corrections");
+                        if (corrections != null && corrections.length() > 0) {
+                            appendCorrections(corrections);
+                            addToReviewDeck(corrections);
+                        }
+                        JSONArray reviews = structured.optJSONArray("review_results");
+                        if (reviews != null && reviews.length() > 0) {
+                            applyReviewResults(reviews);
+                        }
+                    } else {
+                        appendAssistant(step, response); // plain-text step, or the model ignored the JSON format
+                    }
                     setStatus("Ready.");
                     setBusy(false);
                 });
@@ -1382,7 +1424,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    private String postGemini(String systemPrompt, List<JSONObject> history, int maxTokens) throws Exception {
+    private String postGemini(String systemPrompt, List<JSONObject> history, int maxTokens, boolean jsonMode) throws Exception {
         String key = apiKeyField.getText().toString().trim();
         if (key.isEmpty()) {
             throw new IllegalArgumentException("Gemini API Key is empty. Please set it in Settings.");
@@ -1419,6 +1461,7 @@ public class MainActivity extends Activity {
         config.put("temperature", 0.4);
         config.put("topP", 0.8);
         config.put("maxOutputTokens", maxTokens);
+        if (jsonMode) config.put("responseMimeType", "application/json");
         payload.put("generationConfig", config);
 
         try (OutputStream output = connection.getOutputStream();
@@ -1450,7 +1493,7 @@ public class MainActivity extends Activity {
         return body;
     }
 
-    private String postChat(String systemPrompt, List<JSONObject> history, int maxTokens) throws Exception {
+    private String postChat(String systemPrompt, List<JSONObject> history, int maxTokens, boolean jsonMode) throws Exception {
         URL url = new URL(trimSlash(serverUrl()) + "/api/chat");
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("POST");
@@ -1478,6 +1521,7 @@ public class MainActivity extends Activity {
         options.put("repeat_penalty", 1.15);
         options.put("num_predict", maxTokens);
         payload.put("options", options);
+        if (jsonMode) payload.put("format", "json");
 
         try (OutputStream output = connection.getOutputStream();
              BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
@@ -1578,6 +1622,26 @@ public class MainActivity extends Activity {
                     + "Ask the learner this specific opening question: \"" + selected + "\"\n"
                     + "Keep it short and wait for their response.";
         }
+        if ("Recall & Drill".equals(step)) {
+            List<JSONObject> due = dueReviewItems(MAX_REVIEWS_PER_SESSION);
+            if (due.isEmpty()) {
+                return "Start the Recall & Drill step. The learner's review deck has nothing due today, "
+                        + "so run a quick retrieval drill on vocabulary or patterns from the memory files "
+                        + "(or, if there are none, 3 useful C1 collocations). Ask one item at a time and wait.";
+            }
+            StringBuilder items = new StringBuilder();
+            for (JSONObject item : due) {
+                items.append("- id=").append(item.optString("id"))
+                        .append(" | learner's earlier mistake: \"").append(item.optString("original"))
+                        .append("\" | target: \"").append(item.optString("corrected"))
+                        .append("\" | note: ").append(item.optString("explanation")).append('\n');
+            }
+            return "Start the Recall & Drill step. These are mistakes the learner made in earlier sessions "
+                    + "and are due for review:\n" + items
+                    + "Quiz them one item at a time, in order. For each, give a short new context or the Spanish meaning "
+                    + "and ask the learner to say it naturally. Never show the target before they answer. "
+                    + "Start with the first item now.";
+        }
         return "Start the " + step + " step for today's session. If you need learner input, ask for it clearly and wait.";
     }
 
@@ -1594,6 +1658,206 @@ public class MainActivity extends Activity {
 
     private void appendUser(String text) {
         appendTranscript("You", text);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Review deck: every correction becomes a card, reviewed with Leitner-style spaced repetition.
+    // ---------------------------------------------------------------------------------------
+    private static final String REVIEW_DECK_FILE = "review_deck.json";
+    /** Days until the next review for each box. A correct answer moves a card up one box. */
+    private static final int[] REVIEW_INTERVAL_DAYS = {1, 3, 7, 14, 30, 60};
+    private static final int MAX_REVIEWS_PER_SESSION = 4;
+    private static final int MAX_DECK_SIZE = 500;
+
+    /** Parses a JSON coach reply, tolerating markdown fences. Returns null if it isn't one. */
+    private JSONObject parseCoachJson(String response) {
+        int[] span = findJsonObjectContaining(response, "\"message\"");
+        if (span == null) return null;
+        try {
+            JSONObject json = new JSONObject(response.substring(span[0], span[1]));
+            return json.optString("message", "").trim().isEmpty() ? null : json;
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    private File reviewDeckFile() {
+        return new File(getFilesDir(), REVIEW_DECK_FILE);
+    }
+
+    private JSONArray loadReviewDeck() {
+        try {
+            JSONArray items = new JSONObject(readText(reviewDeckFile())).optJSONArray("items");
+            return items != null ? items : new JSONArray();
+        } catch (Exception exception) {
+            return new JSONArray();
+        }
+    }
+
+    private void saveReviewDeck(JSONArray items) {
+        try {
+            if (!writeText(reviewDeckFile(), new JSONObject().put("items", items).toString(2))) {
+                appendSystem("Could not save your review deck.");
+            }
+        } catch (Exception exception) {
+            appendSystem("Could not save your review deck: " + exception.getMessage());
+        }
+        refreshDeckStats();
+    }
+
+    private void addToReviewDeck(JSONArray corrections) {
+        JSONArray deck = loadReviewDeck();
+        String tomorrow = LocalDate.now().plusDays(1).toString();
+        int added = 0;
+        for (int i = 0; i < corrections.length(); i++) {
+            JSONObject c = corrections.optJSONObject(i);
+            if (c == null) continue;
+            String original = c.optString("original").trim();
+            String corrected = c.optString("corrected").trim();
+            if (corrected.isEmpty() || corrected.equalsIgnoreCase(original)) continue;
+            if (findDeckItem(deck, "corrected", corrected) != null) continue; // already in the deck
+            try {
+                deck.put(new JSONObject()
+                        .put("id", "r" + System.currentTimeMillis() + "_" + i)
+                        .put("original", original)
+                        .put("corrected", corrected)
+                        .put("explanation", c.optString("explanation").trim())
+                        .put("category", c.optString("category", "other").trim().toLowerCase(Locale.US))
+                        .put("created", LocalDate.now().toString())
+                        .put("box", 0)
+                        .put("due", tomorrow)
+                        .put("reviews", 0)
+                        .put("lapses", 0));
+                added++;
+            } catch (Exception ignored) {
+                // put() only fails on null keys
+            }
+        }
+        if (added == 0) return;
+        // Keep the deck bounded: drop the oldest cards first
+        while (deck.length() > MAX_DECK_SIZE) deck.remove(0);
+        saveReviewDeck(deck);
+    }
+
+    private JSONObject findDeckItem(JSONArray deck, String field, String value) {
+        for (int i = 0; i < deck.length(); i++) {
+            JSONObject item = deck.optJSONObject(i);
+            if (item != null && item.optString(field).trim().equalsIgnoreCase(value.trim())) return item;
+        }
+        return null;
+    }
+
+    /** Cards due today or earlier, most overdue first. */
+    private List<JSONObject> dueReviewItems(int max) {
+        JSONArray deck = loadReviewDeck();
+        String today = LocalDate.now().toString();
+        ArrayList<JSONObject> due = new ArrayList<>();
+        for (int i = 0; i < deck.length(); i++) {
+            JSONObject item = deck.optJSONObject(i);
+            if (item != null && item.optString("due", today).compareTo(today) <= 0) due.add(item);
+        }
+        due.sort((a, b) -> a.optString("due").compareTo(b.optString("due")));
+        return due.size() > max ? new ArrayList<>(due.subList(0, max)) : due;
+    }
+
+    private void applyReviewResults(JSONArray results) {
+        JSONArray deck = loadReviewDeck();
+        int right = 0, wrong = 0;
+        for (int i = 0; i < results.length(); i++) {
+            JSONObject r = results.optJSONObject(i);
+            if (r == null) continue;
+            JSONObject item = findDeckItem(deck, "id", r.optString("id"));
+            if (item == null) continue; // model invented or mangled an id
+            boolean correct = r.optBoolean("correct", false);
+            int box = item.optInt("box", 0);
+            box = correct ? Math.min(box + 1, REVIEW_INTERVAL_DAYS.length - 1) : 0;
+            try {
+                item.put("box", box)
+                        .put("due", LocalDate.now().plusDays(REVIEW_INTERVAL_DAYS[box]).toString())
+                        .put("reviews", item.optInt("reviews", 0) + 1)
+                        .put("last_reviewed", LocalDate.now().toString());
+                if (!correct) item.put("lapses", item.optInt("lapses", 0) + 1);
+            } catch (Exception ignored) {
+            }
+            if (correct) right++; else wrong++;
+        }
+        if (right + wrong == 0) return;
+        saveReviewDeck(deck);
+        appendSystem("Review: " + right + " correct, " + wrong + " to practise again tomorrow.");
+    }
+
+    private void refreshDeckStats() {
+        if (deckStatsView == null) return;
+        JSONArray deck = loadReviewDeck();
+        int due = dueReviewItems(Integer.MAX_VALUE).size();
+        int mastered = 0;
+        for (int i = 0; i < deck.length(); i++) {
+            JSONObject item = deck.optJSONObject(i);
+            if (item != null && item.optInt("box", 0) >= 3) mastered++; // survived a 14-day interval
+        }
+        deckStatsView.setText(deck.length() == 0
+                ? "📚 Review deck is empty. Your corrections will be saved here."
+                : "📚 Review deck: " + deck.length() + " cards · " + due + " due today · " + mastered + " mastered");
+    }
+
+    /** Shows the coach's corrections as a compact card and records them in the transcript. */
+    private void appendCorrections(JSONArray corrections) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(12), dp(16), dp(12));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(12));
+        bg.setColor(Color.argb(30, 250, 204, 21));
+        bg.setStroke(dp(1), Color.rgb(202, 138, 4));
+        card.setBackground(bg);
+
+        TextView title = new TextView(this);
+        title.setText("✏️ CORRECTIONS · SAVED TO YOUR REVIEW DECK");
+        title.setTextSize(10);
+        title.setTextColor(Color.rgb(250, 204, 21));
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        card.addView(title);
+
+        StringBuilder log = new StringBuilder();
+        for (int i = 0; i < corrections.length(); i++) {
+            JSONObject c = corrections.optJSONObject(i);
+            if (c == null || c.optString("corrected").trim().isEmpty()) continue;
+            String original = c.optString("original").trim();
+            String corrected = c.optString("corrected").trim();
+            String why = c.optString("explanation").trim();
+
+            if (!original.isEmpty()) {
+                TextView wrong = new TextView(this);
+                wrong.setText("✗ " + original);
+                wrong.setTextColor(Color.rgb(248, 113, 113));
+                wrong.setTextSize(15);
+                wrong.setPaintFlags(wrong.getPaintFlags() | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
+                wrong.setPadding(0, dp(10), 0, 0);
+                card.addView(wrong);
+            }
+            TextView right = new TextView(this);
+            right.setText("✓ " + corrected);
+            right.setTextColor(Color.rgb(74, 222, 128));
+            right.setTextSize(15);
+            right.setTextIsSelectable(true);
+            card.addView(right);
+            if (!why.isEmpty()) {
+                TextView note = new TextView(this);
+                note.setText(why);
+                note.setTextColor(COLOR_TEXT_SECONDARY);
+                note.setTextSize(12);
+                card.addView(note);
+            }
+            log.append("\n- ").append(original).append(" → ").append(corrected);
+            if (!why.isEmpty()) log.append(" (").append(why).append(")");
+        }
+        if (log.length() == 0) return;
+        transcript.append("\n\n[Corrections]").append(log);
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, 0, dp(32), dp(16));
+        transcriptContainer.addView(card, params);
     }
 
     private void appendAssistant(String step, String text) {
@@ -1807,21 +2071,23 @@ public class MainActivity extends Activity {
         card.addView(speakerView);
         card.addView(contentView);
         
-        if ("Input Immersion".equals(speaker)) {
-            Button listenButton = secondaryButton("🔊 Listen to Content");
-            if (tts == null) {
-                listenButton.setEnabled(false);
-                listenButton.setAlpha(0.6f);
-                listenButton.setText("🔊 TTS Initializing...");
-            }
+        boolean isImmersion = "Input Immersion".equals(speaker);
+        boolean isCoach = !"You".equals(speaker) && !"System".equals(speaker);
+        if (isCoach && !text.trim().isEmpty()) {
+            // Every coach message can be heard, so the learner also trains listening and pronunciation.
+            Button listenButton = secondaryButton(isImmersion ? "🔊 Listen to Content" : "🔊 Listen");
+            listenButton.setTextSize(isImmersion ? 16 : 13);
             listenButton.setOnClickListener(v -> {
                 if (tts != null) {
-                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "immersion");
+                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "coach");
+                } else {
+                    setStatus("Text-to-speech is not ready yet.");
                 }
             });
-            LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
-            btnParams.setMargins(0, dp(24), 0, 0);
+            LinearLayout.LayoutParams btnParams = isImmersion
+                    ? new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48))
+                    : new LinearLayout.LayoutParams(dp(110), dp(36));
+            btnParams.setMargins(0, dp(isImmersion ? 24 : 10), 0, 0);
             card.addView(listenButton, btnParams);
         }
         
