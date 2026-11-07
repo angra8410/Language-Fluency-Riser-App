@@ -282,7 +282,7 @@ public class MainActivity extends Activity {
                 dateView.setText(prettyDate.length() > 16 ? prettyDate.substring(0, 16) : prettyDate);
                 dateView.setTextColor(COLOR_TEXT_PRIMARY);
                 dateView.setTextSize(16);
-                dateView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+                dateView.setTypeface(font(FONT_MEDIUM));
                 logPanel.addView(dateView);
                 
                 TextView modelView = new TextView(this);
@@ -441,6 +441,7 @@ public class MainActivity extends Activity {
         voiceMode = prefs.getBoolean(PREF_VOICE_MODE, false);
         selectedFocusArea = prefs.getString(PREF_FOCUS, "Auto");
         fullDaySession = prefs.getBoolean(PREF_FULL_DAY, false);
+        loadFonts();
         buildUi();
         loadPrefs();
         initTts();
@@ -574,7 +575,7 @@ public class MainActivity extends Activity {
             ((LineIcon) item.getChildAt(0)).setColor(color);
             TextView label = (TextView) item.getChildAt(1);
             label.setTextColor(color);
-            label.setTypeface(Typeface.create("sans-serif-medium", i == index ? Typeface.BOLD : Typeface.NORMAL));
+            label.setTypeface(font(i == index ? FONT_SEMIBOLD : FONT_REGULAR));
             item.setSelected(i == index);
         }
         if (index == 0) refreshToday();
@@ -899,6 +900,7 @@ public class MainActivity extends Activity {
         userInput.setHintTextColor(COLOR_TEXT_FAINT);
         userInput.setTextColor(COLOR_TEXT_PRIMARY);
         userInput.setTextSize(16);
+        userInput.setTypeface(font(FONT_REGULAR));
         userInput.setMinHeight(dp(52));
         userInput.setMaxLines(5);
         userInput.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
@@ -1693,7 +1695,7 @@ public class MainActivity extends Activity {
             instruction.setPadding(0, dp(16), 0, dp(6));
             card.addView(instruction);
             TextView prompt = heading(original.isEmpty() ? item.optString("explanation") : "\"" + original + "\"", 22);
-            prompt.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            prompt.setTypeface(font(FONT_HEADING_MEDIUM));
             card.addView(prompt);
 
             reviewLiveView = text(reviewHeard.isEmpty() ? "" : "You said: \"" + reviewHeard + "\"", 15, COLOR_TEXT_PRIMARY, false);
@@ -2135,15 +2137,48 @@ public class MainActivity extends Activity {
         view.setText(value);
         view.setTextSize(sp);
         view.setTextColor(color);
-        view.setTypeface(Typeface.create(bold ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
+        view.setTypeface(font(bold ? FONT_SEMIBOLD : FONT_REGULAR));
         return view;
     }
 
+    /** Space Grotesk headings: bold for screen titles, semibold for card and step titles. */
     private TextView heading(String value, float sp) {
         TextView view = text(value, sp, COLOR_TEXT_PRIMARY, false);
-        view.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-        letterSpacing(view, -0.01f);
+        view.setTypeface(font(sp >= 26 ? FONT_DISPLAY : FONT_HEADING));
+        letterSpacing(view, sp >= 26 ? -0.02f : -0.01f);
         return view;
+    }
+
+    // Bundled variable fonts (SIL OFL, licenses in assets/fonts): Inter for text, Space Grotesk for headings.
+    private static final int FONT_REGULAR = 0, FONT_MEDIUM = 1, FONT_SEMIBOLD = 2,
+            FONT_HEADING_MEDIUM = 3, FONT_HEADING = 4, FONT_DISPLAY = 5;
+    private final Typeface[] fonts = new Typeface[6];
+
+    private void loadFonts() {
+        fonts[FONT_REGULAR] = variableFont("fonts/Inter.ttf", 400, Typeface.create("sans-serif", Typeface.NORMAL));
+        fonts[FONT_MEDIUM] = variableFont("fonts/Inter.ttf", 500, font(FONT_MEDIUM));
+        fonts[FONT_SEMIBOLD] = variableFont("fonts/Inter.ttf", 600, font(FONT_SEMIBOLD));
+        fonts[FONT_HEADING_MEDIUM] = variableFont("fonts/SpaceGrotesk.ttf", 500, fonts[FONT_MEDIUM]);
+        fonts[FONT_HEADING] = variableFont("fonts/SpaceGrotesk.ttf", 600, fonts[FONT_SEMIBOLD]);
+        fonts[FONT_DISPLAY] = variableFont("fonts/SpaceGrotesk.ttf", 700, fonts[FONT_SEMIBOLD]);
+    }
+
+    /** One weight of a variable font from assets; falls back to a system font if it can't load. */
+    private Typeface variableFont(String asset, int weight, Typeface fallback) {
+        try {
+            Typeface typeface = new Typeface.Builder(getAssets(), asset)
+                    .setFontVariationSettings("'wght' " + weight)
+                    .setWeight(weight)
+                    .build();
+            return typeface != null ? typeface : fallback;
+        } catch (Exception exception) {
+            return fallback;
+        }
+    }
+
+    private Typeface font(int which) {
+        Typeface typeface = fonts[which];
+        return typeface != null ? typeface : Typeface.DEFAULT;
     }
 
     private void letterSpacing(TextView view, float em) {
@@ -2243,7 +2278,7 @@ public class MainActivity extends Activity {
         label.setText(text.toUpperCase(Locale.US));
         label.setTextColor(COLOR_TEXT_SECONDARY);
         label.setTextSize(12);
-        label.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        label.setTypeface(font(FONT_SEMIBOLD));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             label.setLetterSpacing(0.12f);
         }
@@ -2256,7 +2291,7 @@ public class MainActivity extends Activity {
         label.setText(text);
         label.setTextColor(COLOR_TEXT_PRIMARY);
         label.setTextSize(14);
-        label.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        label.setTypeface(font(FONT_SEMIBOLD));
         label.setPadding(0, dp(8), 0, dp(4));
         return label;
     }
@@ -2277,6 +2312,7 @@ public class MainActivity extends Activity {
         field.setHintTextColor(COLOR_TEXT_SECONDARY);
         field.setTextColor(COLOR_TEXT_PRIMARY);
         field.setTextSize(16);
+        field.setTypeface(font(FONT_REGULAR));
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         field.setPadding(dp(12), 0, dp(12), 0);
         field.setBackground(inputBackground());
@@ -2295,6 +2331,7 @@ public class MainActivity extends Activity {
         field.setMinLines(4);
         field.setGravity(Gravity.TOP | Gravity.START);
         field.setTextSize(16);
+        field.setTypeface(font(FONT_REGULAR));
         field.setTextColor(COLOR_TEXT_PRIMARY);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         field.setPadding(dp(12), dp(12), dp(12), dp(12));
@@ -2353,7 +2390,7 @@ public class MainActivity extends Activity {
         button.setText(text);
         button.setAllCaps(false);
         button.setTextColor(Color.WHITE);
-        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        button.setTypeface(font(FONT_SEMIBOLD));
         button.setTextSize(16);
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(COLOR_ACCENT);
@@ -2371,7 +2408,7 @@ public class MainActivity extends Activity {
         button.setText(text);
         button.setAllCaps(false);
         button.setTextColor(COLOR_ACCENT);
-        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setTypeface(font(FONT_MEDIUM));
         button.setTextSize(16);
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(Color.rgb(22, 28, 45)); // COLOR_BG_CARD
