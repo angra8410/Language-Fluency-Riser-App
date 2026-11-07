@@ -57,12 +57,31 @@ public class MainActivity extends Activity {
     private static final String PREFS = "fluency_riser_prefs";
     private static final String PREF_SERVER = "server_url";
     private static final String PREF_MODEL = "model";
+    private static final String PREF_SERVICE_TYPE = "service_type";
+    private static final String PREF_API_KEY = "api_key";
     private static final String EMULATOR_DEFAULT_SERVER = "http://10.0.2.2:11434";
     private static final String PHONE_USB_REVERSE_SERVER = "http://127.0.0.1:11434";
     private static final String DEFAULT_MODEL = "gemma3:12b";
     private static final String EMULATOR_HOST = "10.0.2.2";
     private static final int MAX_MEMORY_CHARS = 5000;
     private static final int MAX_RESPONSES_PER_SESSION = 5;
+    private static final String GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
+    private static final String CLOSING_STEP = "Supervisor Closing";
+    // Output budgets: normal coaching turns are short; the closing step must fit a memory_update JSON.
+    private static final int OLLAMA_TOKENS_DEFAULT = 200;
+    private static final int OLLAMA_TOKENS_CLOSING = 900;
+    private static final int GEMINI_TOKENS_DEFAULT = 1024;
+    private static final int GEMINI_TOKENS_CLOSING = 4096;
+
+    // Premium Dark Theme Color Palette Tokens
+    private static final int COLOR_BG_ROOT = Color.rgb(10, 14, 23); // Deep space background
+    private static final int COLOR_BG_CARD = Color.rgb(22, 28, 45); // Slate/Navy glassmorphic card background
+    private static final int COLOR_BORDER_CARD = Color.argb(40, 255, 255, 255); // Muted border
+    private static final int COLOR_TEXT_PRIMARY = Color.rgb(243, 244, 246); // Off-white
+    private static final int COLOR_TEXT_SECONDARY = Color.rgb(156, 163, 175); // Lavender-grey
+    private static final int COLOR_ACCENT = Color.rgb(99, 102, 241); // Tailwind Indigo-500
+    private static final int COLOR_INPUT_BG = Color.rgb(15, 23, 42); // Very dark slate for inputs
+
     private static final String CONCISE_COACH_SYSTEM_PROMPT = 
             "You are a concise English speaking coach inside a mobile app.\n\n"
             + "Rules:\n"
@@ -88,9 +107,18 @@ public class MainActivity extends Activity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ArrayList<String> chain = new ArrayList<>();
     private final StringBuilder transcript = new StringBuilder();
+    // Full session conversation sent to the model on every request. Touched only on the main thread.
+    // Each entry is {"role": "user"|"assistant", "content": "..."}.
+    private final ArrayList<JSONObject> conversation = new ArrayList<>();
     private int userResponseCount = 0;
 
     private EditText serverUrlField;
+    private Spinner serviceTypeSpinner;
+    private TextView serverUrlLabel;
+    private TextView serverUrlHint;
+    private TextView apiKeyLabel;
+    private EditText apiKeyField;
+    private TextView apiKeyHint;
     private EditText modelField;
     private EditText userInput;
     private ScrollView mainScrollView;
@@ -102,6 +130,7 @@ public class MainActivity extends Activity {
     private View homeNav, historyNav, settingsNav;
     private int currentTab = 0;
     private TextView currentStepView;
+    private TextView currentStepDescView;
     private TextView autoFocusInfo;
     private Spinner focusSpinner;
     private String selectedFocusArea = "Auto";
@@ -114,6 +143,7 @@ public class MainActivity extends Activity {
     private Button testButton;
     private Button micButton;
     private Button largeMicButton;
+    private TextView writingHelper;
     private TextView speakingHint;
     private TextView immersionHint;
     private SpeechRecognizer speechRecognizer;
@@ -159,18 +189,28 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            getWindow().setStatusBarColor(COLOR_BG_ROOT);
+            getWindow().setNavigationBarColor(Color.rgb(15, 23, 42));
+        }
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(243, 246, 250));
+        root.setBackgroundColor(COLOR_BG_ROOT);
 
         tabContentContainer = new FrameLayout(this);
         root.addView(tabContentContainer, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
-        // Navigation Bar
+        // Navigation Bar - Dark Glassmorphism style
         LinearLayout navBar = new LinearLayout(this);
         navBar.setOrientation(LinearLayout.HORIZONTAL);
-        navBar.setBackgroundColor(Color.WHITE);
+        
+        GradientDrawable navBg = new GradientDrawable();
+        navBg.setColor(Color.rgb(15, 23, 42));
+        navBg.setStroke(dp(1), Color.rgb(30, 41, 59));
+        navBar.setBackground(navBg);
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             navBar.setElevation(dp(8));
         }
@@ -181,9 +221,9 @@ public class MainActivity extends Activity {
         historyNav = navItem("History", "📜");
         settingsNav = navItem("Settings", "⚙️");
 
-        navBar.addView(homeNav, weightParams());
-        navBar.addView(historyNav, weightParams());
-        navBar.addView(settingsNav, weightParams());
+        navBar.addView(homeNav, navBarParams());
+        navBar.addView(historyNav, navBarParams());
+        navBar.addView(settingsNav, navBarParams());
 
         // Tabs
         homeTab = buildHomeTab();
@@ -213,13 +253,17 @@ public class MainActivity extends Activity {
 
         TextView iconView = new TextView(this);
         iconView.setText(icon);
-        iconView.setTextSize(20);
+        iconView.setTextSize(22);
+        iconView.setGravity(Gravity.CENTER);
         item.addView(iconView);
 
         TextView labelView = new TextView(this);
         labelView.setText(label);
-        labelView.setTextSize(10);
-        labelView.setTypeface(Typeface.DEFAULT_BOLD);
+        labelView.setTextSize(12);
+        labelView.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        labelView.setTextColor(COLOR_TEXT_SECONDARY);
+        labelView.setGravity(Gravity.CENTER);
+        labelView.setPadding(0, dp(2), 0, 0);
         item.addView(labelView);
 
         return item;
@@ -251,7 +295,7 @@ public class MainActivity extends Activity {
             LinearLayout emptyPanel = panel();
             TextView emptyText = new TextView(this);
             emptyText.setText("No practice history yet.\nYour completed sessions will appear here.");
-            emptyText.setTextColor(Color.rgb(113, 128, 150));
+            emptyText.setTextColor(COLOR_TEXT_SECONDARY);
             emptyText.setTextSize(14);
             emptyText.setGravity(Gravity.CENTER);
             emptyText.setPadding(0, dp(64), 0, dp(64));
@@ -276,14 +320,14 @@ public class MainActivity extends Activity {
                 
                 TextView dateView = new TextView(this);
                 dateView.setText(date.replace("T", " ").substring(0, 16));
-                dateView.setTextColor(Color.rgb(30, 41, 59));
+                dateView.setTextColor(COLOR_TEXT_PRIMARY);
                 dateView.setTextSize(16);
                 dateView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
                 logPanel.addView(dateView);
                 
                 TextView modelView = new TextView(this);
                 modelView.setText("Model: " + model);
-                modelView.setTextColor(Color.rgb(100, 116, 139));
+                modelView.setTextColor(COLOR_TEXT_SECONDARY);
                 modelView.setTextSize(12);
                 modelView.setPadding(0, dp(4), 0, dp(8));
                 logPanel.addView(modelView);
@@ -292,7 +336,7 @@ public class MainActivity extends Activity {
                 String preview = transcriptStr.replace("\n", " ").trim();
                 if (preview.length() > 100) preview = preview.substring(0, 97) + "...";
                 previewView.setText(preview);
-                previewView.setTextColor(Color.rgb(71, 85, 105));
+                previewView.setTextColor(COLOR_TEXT_SECONDARY);
                 previewView.setTextSize(14);
                 logPanel.addView(previewView);
                 
@@ -329,15 +373,15 @@ public class MainActivity extends Activity {
 
     private void updateNavItemStyle(View view, boolean active) {
         LinearLayout layout = (LinearLayout) view;
-        int color = active ? Color.rgb(63, 81, 181) : Color.rgb(120, 130, 150);
-        ((TextView) layout.getChildAt(0)).setAlpha(active ? 1.0f : 0.6f);
+        int color = active ? COLOR_ACCENT : COLOR_TEXT_SECONDARY;
+        ((TextView) layout.getChildAt(0)).setAlpha(active ? 1.0f : 0.4f);
         ((TextView) layout.getChildAt(1)).setTextColor(color);
     }
 
     private View buildHomeTab() {
         mainScrollView = new ScrollView(this);
         mainScrollView.setFillViewport(true);
-        mainScrollView.setBackgroundColor(Color.rgb(248, 250, 253));
+        mainScrollView.setBackgroundColor(COLOR_BG_ROOT);
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -351,14 +395,14 @@ public class MainActivity extends Activity {
         
         TextView title = new TextView(this);
         title.setText("Fluency Riser");
-        title.setTextColor(Color.rgb(30, 41, 59));
+        title.setTextColor(COLOR_TEXT_PRIMARY);
         title.setTextSize(34);
-        title.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         hero.addView(title);
 
         TextView subtitle = new TextView(this);
         subtitle.setText("Mastering English C1 Proficiency");
-        subtitle.setTextColor(Color.rgb(100, 116, 139));
+        subtitle.setTextColor(Color.rgb(129, 140, 248));
         subtitle.setTextSize(16);
         subtitle.setPadding(0, dp(4), 0, 0);
         hero.addView(subtitle);
@@ -370,32 +414,54 @@ public class MainActivity extends Activity {
         progressPanel.setPadding(dp(12), dp(20), dp(12), dp(20));
         content.addView(progressPanel);
         
-        LinearLayout stepContainer = horizontal();
-        stepContainer.setPadding(0, dp(8), 0, dp(16));
+        LinearLayout stepContainer = new LinearLayout(this);
+        stepContainer.setOrientation(LinearLayout.HORIZONTAL);
+        stepContainer.setGravity(Gravity.CENTER);
+        stepContainer.setPadding(0, dp(12), 0, dp(24));
+        
         stepViews = new TextView[STEPS.length];
         String[] stepIcons = {"🚀", "🧠", "🎯", "🛠️", "🏁"};
         for (int i = 0; i < STEPS.length; i++) {
+            // Circle view
             stepViews[i] = new TextView(this);
-            stepViews[i].setText(stepIcons[i] + "\n" + STEPS[i]);
-            stepViews[i].setTextSize(9);
+            stepViews[i].setText(stepIcons[i]);
+            stepViews[i].setTextSize(16);
             stepViews[i].setGravity(Gravity.CENTER);
-            stepViews[i].setPadding(0, dp(10), 0, dp(10));
-            stepViews[i].setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-            stepViews[i].setLineSpacing(0, 1.2f);
-            stepContainer.addView(stepViews[i], weightParams());
+            
+            LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(dp(36), dp(36));
+            stepViews[i].setLayoutParams(itemParams);
+            stepContainer.addView(stepViews[i]);
+            
+            // Add connecting line between step icons, except for the last item
+            if (i < STEPS.length - 1) {
+                View line = new View(this);
+                line.setBackgroundColor(COLOR_BORDER_CARD);
+                LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(dp(20), dp(2));
+                lineParams.gravity = Gravity.CENTER_VERTICAL;
+                line.setLayoutParams(lineParams);
+                stepContainer.addView(line);
+            }
         }
         progressPanel.addView(stepContainer);
 
         currentStepView = new TextView(this);
         currentStepView.setText("READY TO START");
-        currentStepView.setTextColor(Color.rgb(113, 128, 150));
-        currentStepView.setTextSize(12);
-        currentStepView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        currentStepView.setTextColor(Color.WHITE);
+        currentStepView.setTextSize(18);
+        currentStepView.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         currentStepView.setGravity(Gravity.CENTER);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            currentStepView.setLetterSpacing(0.05f);
+            currentStepView.setLetterSpacing(0.02f);
         }
         progressPanel.addView(currentStepView);
+
+        currentStepDescView = new TextView(this);
+        currentStepDescView.setText("Configure your practice options below and click 'Begin New Session' to start learning.");
+        currentStepDescView.setTextColor(COLOR_TEXT_SECONDARY);
+        currentStepDescView.setTextSize(13);
+        currentStepDescView.setGravity(Gravity.CENTER);
+        currentStepDescView.setPadding(0, dp(6), 0, 0);
+        progressPanel.addView(currentStepDescView);
 
         // Configuration Section
         content.addView(sectionHeader("🎯 Practice Setup"));
@@ -501,7 +567,7 @@ public class MainActivity extends Activity {
         
         TextView emptyState = new TextView(this);
         emptyState.setText("Your conversation history will appear here");
-        emptyState.setTextColor(Color.rgb(160, 174, 192));
+        emptyState.setTextColor(COLOR_TEXT_SECONDARY);
         emptyState.setTextSize(14);
         emptyState.setGravity(Gravity.CENTER);
         emptyState.setPadding(0, dp(40), 0, dp(40));
@@ -513,9 +579,9 @@ public class MainActivity extends Activity {
         final LinearLayout inputPanel = panel();
         content.addView(inputPanel);
         
-        final TextView writingHelper = new TextView(this);
+        writingHelper = new TextView(this);
         writingHelper.setText("Write your response below.");
-        writingHelper.setTextColor(Color.rgb(63, 81, 181));
+        writingHelper.setTextColor(COLOR_ACCENT);
         writingHelper.setTextSize(13);
         writingHelper.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         writingHelper.setPadding(dp(4), 0, 0, dp(8));
@@ -524,7 +590,7 @@ public class MainActivity extends Activity {
 
         speakingHint = new TextView(this);
         speakingHint.setText("Try to answer in 45 seconds.");
-        speakingHint.setTextColor(Color.rgb(231, 76, 60));
+        speakingHint.setTextColor(Color.rgb(239, 68, 68));
         speakingHint.setTextSize(13);
         speakingHint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         speakingHint.setPadding(dp(4), 0, 0, dp(8));
@@ -533,7 +599,7 @@ public class MainActivity extends Activity {
 
         immersionHint = new TextView(this);
         immersionHint.setText("Reading practice. Use the 'Listen' button for TTS.");
-        immersionHint.setTextColor(Color.rgb(39, 174, 96));
+        immersionHint.setTextColor(Color.rgb(74, 222, 128));
         immersionHint.setTextSize(13);
         immersionHint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         immersionHint.setPadding(dp(4), 0, 0, dp(8));
@@ -550,7 +616,7 @@ public class MainActivity extends Activity {
         largeMicButton.setTextSize(18);
         largeMicButton.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         GradientDrawable largeMicDrawable = new GradientDrawable();
-        largeMicDrawable.setColor(Color.rgb(231, 76, 60));
+        largeMicDrawable.setColor(Color.rgb(239, 68, 68));
         largeMicDrawable.setCornerRadius(dp(16));
         largeMicButton.setBackground(largeMicDrawable);
         largeMicButton.setVisibility(View.GONE);
@@ -581,36 +647,7 @@ public class MainActivity extends Activity {
                     autoFocusInfo.setVisibility(View.GONE);
                 }
                 
-                // Reset all specific UI elements first
-                writingHelper.setVisibility(View.GONE);
-                speakingHint.setVisibility(View.GONE);
-                immersionHint.setVisibility(View.GONE);
-                largeMicButton.setVisibility(View.GONE);
-                userInput.setMinLines(4);
-                userInput.setHint("Share your thoughts or complete the task...");
-                inputPanel.setPadding(dp(20), dp(20), dp(20), dp(20));
-
-                if ("Writing Studio".equals(effective)) {
-                    writingHelper.setText("📝 Adaptive UI: Optimized for long-form writing.");
-                    writingHelper.setVisibility(View.VISIBLE);
-                    userInput.setMinLines(10);
-                    userInput.setHint("Start writing your essay or report here...");
-                    inputPanel.setPadding(dp(20), dp(24), dp(20), dp(24));
-                } else if ("Speaking Lab".equals(effective)) {
-                    speakingHint.setText("🎙️ Adaptive UI: Optimized for speaking practice.");
-                    speakingHint.setVisibility(View.VISIBLE);
-                    largeMicButton.setVisibility(View.VISIBLE);
-                    userInput.setHint("Speak or type your response...");
-                    micButton.setVisibility(View.GONE);
-                } else if ("Input Immersion".equals(effective)) {
-                    immersionHint.setText("📖 Adaptive UI: Optimized for reading & listening.");
-                    immersionHint.setVisibility(View.VISIBLE);
-                    userInput.setMinLines(2);
-                    userInput.setHint("Type a brief reflection or answer...");
-                }
-                
-                // Final unified call to sync mic visibility and speaking hints
-                updateMicButtonVisibility();
+                reconfigureInputUi(effective);
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
         });
@@ -652,7 +689,7 @@ public class MainActivity extends Activity {
     private View buildHistoryTab() {
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
-        scrollView.setBackgroundColor(Color.rgb(248, 250, 253));
+        scrollView.setBackgroundColor(COLOR_BG_ROOT);
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -671,6 +708,7 @@ public class MainActivity extends Activity {
     private View buildSettingsTab() {
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
+        scrollView.setBackgroundColor(COLOR_BG_ROOT);
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -680,10 +718,25 @@ public class MainActivity extends Activity {
         content.addView(sectionHeader("⚙️ Connection Settings"));
         LinearLayout configPanel = panel();
         content.addView(configPanel);
-        configPanel.addView(label("Ollama Server URL"));
+
+        configPanel.addView(label("Service Provider"));
+        serviceTypeSpinner = spinner(Arrays.asList("Ollama (Local)", "Google Gemini"));
+        configPanel.addView(serviceTypeSpinner);
+
+        serverUrlLabel = label("Ollama Server URL");
+        configPanel.addView(serverUrlLabel);
         serverUrlField = field(defaultServerUrl());
         configPanel.addView(serverUrlField);
-        configPanel.addView(hintText("USB: adb reverse tcp:11434 tcp:11434. Emulator: 10.0.2.2."));
+        serverUrlHint = hintText("USB: adb reverse tcp:11434 tcp:11434. Emulator: 10.0.2.2. Tailscale/LAN: http://<computer-ip>:11434.");
+        configPanel.addView(serverUrlHint);
+
+        apiKeyLabel = label("Gemini API Key");
+        configPanel.addView(apiKeyLabel);
+        apiKeyField = field("");
+        apiKeyField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        configPanel.addView(apiKeyField);
+        apiKeyHint = hintText("Get a free key from Google AI Studio.");
+        configPanel.addView(apiKeyHint);
         
         configPanel.addView(label("AI Model"));
         modelField = field(DEFAULT_MODEL);
@@ -701,6 +754,31 @@ public class MainActivity extends Activity {
         statusView.setPadding(0, dp(16), 0, 0);
         content.addView(statusView);
 
+        serviceTypeSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+                boolean isGemini = position == 1;
+                serverUrlLabel.setVisibility(isGemini ? View.GONE : View.VISIBLE);
+                serverUrlField.setVisibility(isGemini ? View.GONE : View.VISIBLE);
+                serverUrlHint.setVisibility(isGemini ? View.GONE : View.VISIBLE);
+                
+                apiKeyLabel.setVisibility(isGemini ? View.VISIBLE : View.GONE);
+                apiKeyField.setVisibility(isGemini ? View.VISIBLE : View.GONE);
+                apiKeyHint.setVisibility(isGemini ? View.VISIBLE : View.GONE);
+
+                if (isGemini) {
+                    if (modelField.getText().toString().trim().equals(DEFAULT_MODEL) || modelField.getText().toString().trim().isEmpty()) {
+                        modelField.setText("gemini-3.5-flash");
+                    }
+                } else {
+                    if (modelField.getText().toString().trim().equals("gemini-3.5-flash") || modelField.getText().toString().trim().isEmpty()) {
+                        modelField.setText(DEFAULT_MODEL);
+                    }
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+
         testButton.setOnClickListener(v -> testConnection());
 
         return scrollView;
@@ -711,12 +789,10 @@ public class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(20), dp(20), dp(20), dp(20));
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.WHITE);
+        drawable.setColor(COLOR_BG_CARD);
         drawable.setCornerRadius(dp(16));
+        drawable.setStroke(dp(1), COLOR_BORDER_CARD);
         panel.setBackground(drawable);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            panel.setElevation(dp(3));
-        }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -737,9 +813,9 @@ public class MainActivity extends Activity {
     private TextView sectionHeader(String text) {
         TextView label = new TextView(this);
         label.setText(text.toUpperCase(Locale.US));
-        label.setTextColor(Color.rgb(100, 116, 139));
+        label.setTextColor(COLOR_TEXT_SECONDARY);
         label.setTextSize(12);
-        label.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        label.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             label.setLetterSpacing(0.12f);
         }
@@ -750,9 +826,9 @@ public class MainActivity extends Activity {
     private TextView label(String text) {
         TextView label = new TextView(this);
         label.setText(text);
-        label.setTextColor(Color.rgb(68, 83, 102));
+        label.setTextColor(COLOR_TEXT_PRIMARY);
         label.setTextSize(14);
-        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         label.setPadding(0, dp(8), 0, dp(4));
         return label;
     }
@@ -760,7 +836,7 @@ public class MainActivity extends Activity {
     private TextView hintText(String text) {
         TextView hint = new TextView(this);
         hint.setText(text);
-        hint.setTextColor(Color.rgb(87, 99, 116));
+        hint.setTextColor(COLOR_TEXT_SECONDARY);
         hint.setTextSize(12);
         hint.setPadding(0, dp(4), 0, dp(8));
         return hint;
@@ -770,7 +846,8 @@ public class MainActivity extends Activity {
         EditText field = new EditText(this);
         field.setSingleLine(true);
         field.setHint(hint);
-        field.setTextColor(Color.rgb(24, 33, 45));
+        field.setHintTextColor(COLOR_TEXT_SECONDARY);
+        field.setTextColor(COLOR_TEXT_PRIMARY);
         field.setTextSize(16);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         field.setPadding(dp(12), 0, dp(12), 0);
@@ -786,10 +863,11 @@ public class MainActivity extends Activity {
     private EditText multiLineField(String hint) {
         EditText field = new EditText(this);
         field.setHint(hint);
+        field.setHintTextColor(COLOR_TEXT_SECONDARY);
         field.setMinLines(4);
         field.setGravity(Gravity.TOP | Gravity.START);
         field.setTextSize(16);
-        field.setTextColor(Color.rgb(24, 33, 45));
+        field.setTextColor(COLOR_TEXT_PRIMARY);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         field.setPadding(dp(12), dp(12), dp(12), dp(12));
         field.setBackground(inputBackground());
@@ -798,19 +876,39 @@ public class MainActivity extends Activity {
 
     private GradientDrawable inputBackground() {
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.rgb(248, 250, 253));
+        drawable.setColor(COLOR_INPUT_BG);
         drawable.setCornerRadius(dp(8));
-        drawable.setStroke(dp(1), Color.rgb(209, 218, 229));
+        drawable.setStroke(dp(1), Color.rgb(51, 65, 85));
         return drawable;
     }
 
     private Spinner spinner(List<String> values) {
         Spinner spinner = new Spinner(this);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
                 this,
                 android.R.layout.simple_spinner_item,
                 values
-        );
+        ) {
+            @Override
+            public View getView(int position, View convertView, android.view.ViewGroup parent) {
+                View v = super.getView(position, convertView, parent);
+                if (v instanceof TextView) {
+                    ((TextView) v).setTextColor(COLOR_TEXT_PRIMARY);
+                    ((TextView) v).setTextSize(16);
+                }
+                return v;
+            }
+            @Override
+            public View getDropDownView(int position, View convertView, android.view.ViewGroup parent) {
+                View v = super.getDropDownView(position, convertView, parent);
+                v.setBackgroundColor(COLOR_BG_CARD);
+                if (v instanceof TextView) {
+                    ((TextView) v).setTextColor(COLOR_TEXT_PRIMARY);
+                    ((TextView) v).setTextSize(16);
+                }
+                return v;
+            }
+        };
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(adapter);
         spinner.setLayoutParams(new LinearLayout.LayoutParams(
@@ -827,10 +925,10 @@ public class MainActivity extends Activity {
         button.setText(text);
         button.setAllCaps(false);
         button.setTextColor(Color.WHITE);
-        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         button.setTextSize(16);
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.rgb(63, 81, 181));
+        drawable.setColor(COLOR_ACCENT);
         drawable.setCornerRadius(dp(12));
         button.setBackground(drawable);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -844,13 +942,13 @@ public class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(text);
         button.setAllCaps(false);
-        button.setTextColor(Color.rgb(63, 81, 181));
+        button.setTextColor(COLOR_ACCENT);
         button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         button.setTextSize(16);
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.WHITE);
+        drawable.setColor(Color.rgb(22, 28, 45)); // COLOR_BG_CARD
         drawable.setCornerRadius(dp(12));
-        drawable.setStroke(dp(1.5f), Color.rgb(226, 232, 240));
+        drawable.setStroke(dp(1.5f), COLOR_ACCENT);
         button.setBackground(drawable);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             button.setElevation(0);
@@ -865,20 +963,32 @@ public class MainActivity extends Activity {
         return params;
     }
 
+    private LinearLayout.LayoutParams navBarParams() {
+        return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1);
+    }
+
+    private GradientDrawable circleDrawable(int color, int strokeColor, int strokeWidthDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setShape(GradientDrawable.OVAL);
+        drawable.setColor(color);
+        if (strokeWidthDp > 0) {
+            drawable.setStroke(dp(strokeWidthDp), strokeColor);
+        }
+        return drawable;
+    }
+
     private void updateStepIndicator(int stepIndex) {
         if (stepViews == null) return;
         for (int i = 0; i < stepViews.length; i++) {
             if (i == stepIndex) {
-                stepViews[i].setTextColor(Color.rgb(63, 81, 181));
                 stepViews[i].setAlpha(1.0f);
-                GradientDrawable active = new GradientDrawable();
-                active.setColor(Color.rgb(232, 240, 254));
-                active.setCornerRadius(dp(12));
-                stepViews[i].setBackground(active);
+                stepViews[i].setBackground(circleDrawable(COLOR_ACCENT, Color.WHITE, 2));
+            } else if (i < stepIndex) {
+                stepViews[i].setAlpha(1.0f);
+                stepViews[i].setBackground(circleDrawable(Color.rgb(15, 118, 110), Color.rgb(20, 184, 166), 1));
             } else {
-                stepViews[i].setTextColor(Color.rgb(160, 174, 192));
-                stepViews[i].setAlpha(0.7f);
-                stepViews[i].setBackground(null);
+                stepViews[i].setAlpha(0.4f);
+                stepViews[i].setBackground(circleDrawable(COLOR_INPUT_BG, COLOR_BORDER_CARD, 1));
             }
         }
     }
@@ -889,18 +999,26 @@ public class MainActivity extends Activity {
 
     private void loadPrefs() {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String serviceType = prefs.getString(PREF_SERVICE_TYPE, "Gemini");
+        int pos = "Gemini".equalsIgnoreCase(serviceType) ? 1 : 0;
+        serviceTypeSpinner.setSelection(pos);
+
         String savedServer = prefs.getString(PREF_SERVER, defaultServerUrl());
         if (isEmulatorOnlyAddressOnPhysicalDevice(savedServer)) {
             savedServer = defaultServerUrl();
         }
         serverUrlField.setText(savedServer);
-        modelField.setText(prefs.getString(PREF_MODEL, DEFAULT_MODEL));
+        apiKeyField.setText(prefs.getString(PREF_API_KEY, ""));
+        modelField.setText(prefs.getString(PREF_MODEL, pos == 1 ? "gemini-3.5-flash" : DEFAULT_MODEL));
     }
 
     private void savePrefs() {
+        String service = serviceTypeSpinner.getSelectedItemPosition() == 1 ? "Gemini" : "Ollama";
         getSharedPreferences(PREFS, MODE_PRIVATE)
                 .edit()
+                .putString(PREF_SERVICE_TYPE, service)
                 .putString(PREF_SERVER, serverUrl())
+                .putString(PREF_API_KEY, apiKeyField.getText().toString().trim())
                 .putString(PREF_MODEL, model())
                 .apply();
     }
@@ -908,6 +1026,7 @@ public class MainActivity extends Activity {
     private void startChain() {
         savePrefs();
         userResponseCount = 0;
+        conversation.clear();
         chain.clear();
         chain.addAll(buildChain());
         chainIndex = -1;
@@ -965,27 +1084,112 @@ public class MainActivity extends Activity {
         }
         if (chainIndex + 1 >= chain.size()) {
             appendSystem("Chain complete. Save the session so today's transcript is stored.");
-            currentStepView.setText("Current step: complete");
+            currentStepView.setText("SESSION COMPLETE");
+            if (currentStepDescView != null) {
+                currentStepDescView.setText("Review your transcript below. You can save your session log to local storage.");
+            }
             updateStepIndicator(4); // Done
             updateMicButtonVisibility();
+            syncFocusUiWithStep("Closing");
             return;
         }
         chainIndex++;
         String step = chain.get(chainIndex);
         
-        int uiIndex = 2; // Default to Drill
-        String uiName = "Drill Phase";
+        int uiIndex = 2; // Default to practice phase
+        String uiName = "Practice Phase";
+        String uiDesc = "Dive into your customized learning studio.";
         
-        if (step.contains("Opening")) { uiIndex = 0; uiName = "Opening"; }
-        else if (step.contains("Recall")) { uiIndex = 1; uiName = "Recall Phase"; }
-        else if (step.contains("Error Analyst")) { uiIndex = 3; uiName = "Error Analysis"; }
-        else if (step.contains("Closing")) { uiIndex = 4; uiName = "Closing Phase"; }
+        if (step.contains("Opening")) { 
+            uiIndex = 0; 
+            uiName = "1. Opening Phase"; 
+            uiDesc = "Warm up your speech with a customized question from the Supervisor.";
+        } else if (step.contains("Recall")) { 
+            uiIndex = 1; 
+            uiName = "2. Recall & Drill"; 
+            uiDesc = "Review and drill vocabulary or patterns from previous sessions.";
+        } else if (step.contains("Speaking Lab") || step.contains("Writing Studio") || step.contains("Input Immersion") || step.contains("Diagnostic Coach")) {
+            uiIndex = 2;
+            uiName = "3. Practice Phase (" + step + ")";
+            uiDesc = "Focus on your targeted " + step + " exercises.";
+        } else if (step.contains("Error Analyst")) { 
+            uiIndex = 3; 
+            uiName = "4. Error Analysis"; 
+            uiDesc = "Review grammatical or pronunciation errors made during this session.";
+        } else if (step.contains("Closing")) { 
+            uiIndex = 4; 
+            uiName = "5. Closing Phase"; 
+            uiDesc = "Consolidate today's learnings and save them to long-term memory.";
+        }
         
         currentStepView.setText(uiName.toUpperCase(Locale.US));
+        if (currentStepDescView != null) {
+            currentStepDescView.setText(uiDesc);
+        }
         updateStepIndicator(uiIndex);
 
+        // Sync Focus Area UI with the current step if it matches a focus mode
+        syncFocusUiWithStep(step);
+        
         updateMicButtonVisibility();
         sendOllama(stepPrompt(step), step);
+    }
+
+    private void syncFocusUiWithStep(String step) {
+        List<String> focusModes = Arrays.asList("Auto", "Speaking Lab", "Writing Studio", "Input Immersion", "Diagnostic Coach");
+        int matchIndex = -1;
+        for (int i = 0; i < focusModes.size(); i++) {
+            if (step.equals(focusModes.get(i))) {
+                matchIndex = i;
+                break;
+            }
+        }
+        
+        if (matchIndex != -1) {
+            updateFocusCardsUi(matchIndex);
+        } else if (step.contains("Opening") || step.contains("Closing") || step.contains("Error Analyst") || step.contains("Recall")) {
+            // Return to neutral state for supervisor/recall steps
+            updateFocusCardsUi(-1); 
+        }
+        
+        reconfigureInputUi(getEffectiveFocusArea());
+    }
+
+    private void reconfigureInputUi(String effective) {
+        // Reset all specific UI elements first
+        writingHelper.setVisibility(View.GONE);
+        speakingHint.setVisibility(View.GONE);
+        immersionHint.setVisibility(View.GONE);
+        largeMicButton.setVisibility(View.GONE);
+        userInput.setMinLines(4);
+        userInput.setHint("Share your thoughts or complete the task...");
+        
+        // Find inputPanel - we need to ensure it's accessible or find it from parent
+        View inputPanel = (View) userInput.getParent();
+        if (inputPanel != null) {
+            inputPanel.setPadding(dp(20), dp(20), dp(20), dp(20));
+        }
+
+        if ("Writing Studio".equals(effective)) {
+            writingHelper.setText("📝 Adaptive UI: Optimized for long-form writing.");
+            writingHelper.setVisibility(View.VISIBLE);
+            userInput.setMinLines(10);
+            userInput.setHint("Start writing your essay or report here...");
+            if (inputPanel != null) inputPanel.setPadding(dp(20), dp(24), dp(20), dp(24));
+        } else if ("Speaking Lab".equals(effective)) {
+            speakingHint.setText("🎙️ Adaptive UI: Optimized for speaking practice.");
+            speakingHint.setVisibility(View.VISIBLE);
+            largeMicButton.setVisibility(View.VISIBLE);
+            userInput.setHint("Speak or type your response...");
+            micButton.setVisibility(View.GONE);
+        } else if ("Input Immersion".equals(effective)) {
+            immersionHint.setText("📖 Adaptive UI: Optimized for reading & listening.");
+            immersionHint.setVisibility(View.VISIBLE);
+            userInput.setMinLines(2);
+            userInput.setHint("Type a brief reflection or answer...");
+        }
+        
+        updateMicButtonVisibility();
     }
 
     private void sendCurrentInput() {
@@ -1024,6 +1228,15 @@ public class MainActivity extends Activity {
 
     private void testConnection() {
         savePrefs();
+        boolean isGemini = (serviceTypeSpinner != null && serviceTypeSpinner.getSelectedItemPosition() == 1);
+        if (isGemini) {
+            testGeminiConnection();
+        } else {
+            testOllamaConnection();
+        }
+    }
+
+    private void testOllamaConnection() {
         String urlBase = trimSlash(serverUrl());
         if (urlBase.isEmpty()) {
             setStatus("Invalid URL");
@@ -1063,34 +1276,179 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void sendOllama(String userPrompt, String step) {
-        String setupIssue = ollamaSetupIssue();
-        if (setupIssue != null) {
-            appendSystem(setupIssue);
-            setStatus("Update the Ollama server URL for this device.");
+    private void testGeminiConnection() {
+        String key = apiKeyField.getText().toString().trim();
+        String modelName = model();
+        if (key.isEmpty()) {
+            setStatus("API Key required");
             return;
         }
         setBusy(true);
-        setStatus("Contacting Ollama...");
+        setStatus("Testing Gemini...");
         executor.execute(() -> {
             try {
-                String response = postChat(systemPromptForStep(step), userPrompt);
+                URL url = new URL(GEMINI_BASE_URL + modelName + ":generateContent");
+                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(8000);
+                connection.setReadTimeout(8000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/json");
+                connection.setRequestProperty("x-goog-api-key", key);
+
+                JSONObject payload = new JSONObject();
+                JSONArray parts = new JSONArray().put(new JSONObject().put("text", "Ping"));
+                JSONArray contents = new JSONArray().put(new JSONObject().put("parts", parts));
+                payload.put("contents", contents);
+                payload.put("generationConfig", new JSONObject().put("maxOutputTokens", 1024));
+
+                try (OutputStream output = connection.getOutputStream();
+                     BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
+                    writer.write(payload.toString());
+                }
+
+                int code = connection.getResponseCode();
                 mainHandler.post(() -> {
-                    appendAssistant(step, response);
-                    setStatus("Ready.");
+                    if (code == 200) {
+                        setStatus("Connected to Gemini");
+                    } else {
+                        setStatus("Failed (HTTP " + code + ")");
+                    }
                     setBusy(false);
                 });
             } catch (Exception exception) {
                 mainHandler.post(() -> {
-                    appendSystem("Error: " + ollamaConnectionErrorMessage(exception));
-                    setStatus(ollamaConnectionStatusMessage());
+                    setStatus("Failed: " + exception.getMessage());
                     setBusy(false);
                 });
             }
         });
     }
 
-    private String postChat(String systemPrompt, String userPrompt) throws Exception {
+    private void sendOllama(String userPrompt, String step) {
+        boolean isGemini = (serviceTypeSpinner != null && serviceTypeSpinner.getSelectedItemPosition() == 1);
+        
+        if (!isGemini) {
+            String setupIssue = ollamaSetupIssue();
+            if (setupIssue != null) {
+                appendSystem(setupIssue);
+                setStatus("Update the Ollama server URL for this device.");
+                return;
+            }
+        }
+        
+        // Snapshot the conversation on the main thread, with the new user turn appended.
+        // The turn is committed to history only after a successful reply, so a failed
+        // request can be retried without duplicating it.
+        final JSONObject userTurn;
+        try {
+            userTurn = new JSONObject().put("role", "user").put("content", userPrompt);
+        } catch (Exception e) {
+            appendSystem("Error: " + e.getMessage());
+            return;
+        }
+        final List<JSONObject> messages = new ArrayList<>(conversation);
+        messages.add(userTurn);
+        final String systemPrompt = systemPromptForStep(step);
+        final boolean closing = CLOSING_STEP.equals(step);
+
+        setBusy(true);
+        setStatus(isGemini ? "Contacting Gemini..." : "Contacting Ollama...");
+        executor.execute(() -> {
+            try {
+                String response = isGemini
+                        ? postGemini(systemPrompt, messages, closing ? GEMINI_TOKENS_CLOSING : GEMINI_TOKENS_DEFAULT)
+                        : postChat(systemPrompt, messages, closing ? OLLAMA_TOKENS_CLOSING : OLLAMA_TOKENS_DEFAULT);
+                mainHandler.post(() -> {
+                    conversation.add(userTurn);
+                    try {
+                        conversation.add(new JSONObject().put("role", "assistant").put("content", response));
+                    } catch (Exception ignored) {
+                        // JSONObject.put only throws for null keys / non-finite numbers.
+                    }
+                    appendAssistant(step, response);
+                    setStatus("Ready.");
+                    setBusy(false);
+                });
+            } catch (Exception exception) {
+                mainHandler.post(() -> {
+                    appendSystem("Error: " + (isGemini ? exception.getMessage() : ollamaConnectionErrorMessage(exception)));
+                    setStatus(isGemini ? "Check API key and network." : ollamaConnectionStatusMessage());
+                    setBusy(false);
+                });
+            }
+        });
+    }
+
+    private String postGemini(String systemPrompt, List<JSONObject> history, int maxTokens) throws Exception {
+        String key = apiKeyField.getText().toString().trim();
+        if (key.isEmpty()) {
+            throw new IllegalArgumentException("Gemini API Key is empty. Please set it in Settings.");
+        }
+
+        URL url = new URL(GEMINI_BASE_URL + model() + ":generateContent");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(120000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        connection.setRequestProperty("x-goog-api-key", key);
+
+        JSONObject payload = new JSONObject();
+        
+        // System instruction
+        JSONObject systemInstruction = new JSONObject();
+        JSONArray sysParts = new JSONArray().put(new JSONObject().put("text", systemPrompt));
+        systemInstruction.put("parts", sysParts);
+        payload.put("systemInstruction", systemInstruction);
+
+        // Contents: the whole session so far (Gemini calls the assistant role "model")
+        JSONArray contents = new JSONArray();
+        for (JSONObject turn : history) {
+            String role = "assistant".equals(turn.optString("role")) ? "model" : "user";
+            JSONArray parts = new JSONArray().put(new JSONObject().put("text", turn.optString("content")));
+            contents.put(new JSONObject().put("role", role).put("parts", parts));
+        }
+        payload.put("contents", contents);
+
+        // Options
+        JSONObject config = new JSONObject();
+        config.put("temperature", 0.4);
+        config.put("topP", 0.8);
+        config.put("maxOutputTokens", maxTokens);
+        payload.put("generationConfig", config);
+
+        try (OutputStream output = connection.getOutputStream();
+             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
+            writer.write(payload.toString());
+        }
+
+        int code = connection.getResponseCode();
+        InputStream input = code >= 200 && code < 300
+                ? connection.getInputStream()
+                : connection.getErrorStream();
+        String body = readStream(input);
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + ": " + body);
+        }
+
+        JSONObject json = new JSONObject(body);
+        JSONArray candidates = json.optJSONArray("candidates");
+        if (candidates != null && candidates.length() > 0) {
+            JSONObject candidate = candidates.getJSONObject(0);
+            JSONObject content = candidate.optJSONObject("content");
+            if (content != null) {
+                JSONArray resParts = content.optJSONArray("parts");
+                if (resParts != null && resParts.length() > 0) {
+                    return resParts.getJSONObject(0).optString("text", body);
+                }
+            }
+        }
+        return body;
+    }
+
+    private String postChat(String systemPrompt, List<JSONObject> history, int maxTokens) throws Exception {
         URL url = new URL(trimSlash(serverUrl()) + "/api/chat");
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("POST");
@@ -1101,7 +1459,11 @@ public class MainActivity extends Activity {
 
         JSONArray messages = new JSONArray();
         messages.put(new JSONObject().put("role", "system").put("content", systemPrompt));
-        messages.put(new JSONObject().put("role", "user").put("content", userPrompt));
+        for (JSONObject turn : history) {
+            messages.put(new JSONObject()
+                    .put("role", turn.optString("role"))
+                    .put("content", turn.optString("content")));
+        }
 
         JSONObject payload = new JSONObject();
         payload.put("model", model());
@@ -1112,7 +1474,7 @@ public class MainActivity extends Activity {
         options.put("temperature", 0.4);
         options.put("top_p", 0.8);
         options.put("repeat_penalty", 1.15);
-        options.put("num_predict", 90);
+        options.put("num_predict", maxTokens);
         payload.put("options", options);
 
         try (OutputStream output = connection.getOutputStream();
@@ -1151,7 +1513,17 @@ public class MainActivity extends Activity {
             case "Supervisor Opening":
                 return "Act as Supervisor GPT. Choose today's priorities and start the session immediately.";
             case "Supervisor Closing":
-                return "Act as Supervisor GPT closing step. Consolidate progress and output a compact memory_update JSON.";
+                return "Act as Supervisor GPT closing step. Review the whole conversation above.\n"
+                        + "Output exactly two parts:\n"
+                        + "1. A short closing message to the learner (max 60 words): one strength, one thing to work on.\n"
+                        + "2. Then a single JSON object (no markdown fences, no comments) with this shape:\n"
+                        + "{\"memory_update\": {\n"
+                        + "  \"learner_profile.json\": {\"current_estimate\": \"B2|B2+|C1\", \"notes\": [\"new short note\"]},\n"
+                        + "  \"progress_tracker.json\": {\"scores\": {\"skill\": number}, \"recurring_weaknesses\": [\"new pattern\"], \"last_session\": \"YYYY-MM-DD: one-line summary\"},\n"
+                        + "  \"review_queue.json\": {\"items\": [\"phrase or pattern to review next time\"]}\n"
+                        + "}}\n"
+                        + "Only include NEW array entries; existing ones are kept automatically. "
+                        + "Omit any field you have nothing new for. The 60-word limit does not apply to the JSON.";
             case "Recall & Drill":
                 return "Act as Recall & Drill GPT. Run retrieval practice. Ask one item at a time.";
             case "Speaking Lab":
@@ -1231,45 +1603,121 @@ public class MainActivity extends Activity {
     }
 
     private String processMemoryUpdate(String text) {
+        int[] span = findJsonObjectContaining(text, "\"memory_update\"");
+        if (span == null) {
+            appendSystem("No memory update was received this session, so your learner files are unchanged.");
+            return text;
+        }
         try {
-            int start = text.indexOf("{");
-            int end = text.lastIndexOf("}");
-            if (start != -1 && end != -1 && end > start) {
-                String jsonStr = text.substring(start, end + 1);
-                JSONObject update = new JSONObject(jsonStr);
-                if (update.has("memory_update")) {
-                    applyMemoryUpdate(update.getJSONObject("memory_update"));
-                    // Return text without the JSON block for a cleaner UI
-                    return (text.substring(0, start) + text.substring(end + 1)).trim();
-                }
-            }
+            JSONObject update = new JSONObject(text.substring(span[0], span[1]));
+            applyMemoryUpdate(update.getJSONObject("memory_update"));
         } catch (Exception exception) {
             appendSystem("Memory update failed: " + exception.getMessage());
+            return text;
         }
-        return text;
+        // Show the learner only the closing message, without the JSON (or any ```json fence around it)
+        String before = text.substring(0, span[0]).replaceAll("```(?:json)?\\s*$", "");
+        String after = text.substring(span[1]).replaceAll("^\\s*```", "");
+        return (before + after).trim();
     }
 
-    private void applyMemoryUpdate(JSONObject update) {
-        String[] files = {"learner_profile.json", "progress_tracker.json", "review_queue.json"};
-        for (String fileName : files) {
-            if (update.has(fileName)) {
-                try {
-                    File file = new File(getFilesDir(), fileName);
-                    JSONObject current = new JSONObject(readText(file));
-                    JSONObject newData = update.getJSONObject(fileName);
-                    
-                    // Merge logic: only allow-listed fields or preserve existing
-                    java.util.Iterator<String> keys = newData.keys();
-                    while (keys.hasNext()) {
-                        String key = keys.next();
-                        current.put(key, newData.get(key));
+    /**
+     * Returns [start, endExclusive] of the outermost balanced {...} object that contains marker,
+     * respecting JSON string literals, or null if none is found or it is truncated.
+     */
+    private int[] findJsonObjectContaining(String text, String marker) {
+        int markerPos = text.indexOf(marker);
+        if (markerPos < 0) return null;
+        for (int start = text.lastIndexOf('{', markerPos); start >= 0; start = text.lastIndexOf('{', start - 1)) {
+            int depth = 0;
+            boolean inString = false;
+            for (int i = start; i < text.length(); i++) {
+                char c = text.charAt(i);
+                if (inString) {
+                    if (c == '\\') i++;
+                    else if (c == '"') inString = false;
+                } else if (c == '"') {
+                    inString = true;
+                } else if (c == '{') {
+                    depth++;
+                } else if (c == '}') {
+                    depth--;
+                    if (depth == 0) {
+                        if (i > markerPos) return new int[]{start, i + 1};
+                        break; // this object closes before the marker; try an earlier '{'
                     }
-                    
-                    writeText(file, current.toString(2));
+                }
+            }
+            if (start == 0) break;
+        }
+        return null;
+    }
+
+    // Fields the model may write in each memory file, and the max length of array fields.
+    private static final String[][] MEMORY_SCHEMA = {
+            {"learner_profile.json", "current_estimate", "immersion_phase", "notes"},
+            {"progress_tracker.json", "week", "scores", "recurring_weaknesses", "last_session"},
+            {"review_queue.json", "items"},
+    };
+    private static final int MAX_MEMORY_ARRAY_ITEMS = 40;
+
+    private void applyMemoryUpdate(JSONObject update) {
+        for (String[] schema : MEMORY_SCHEMA) {
+            String fileName = schema[0];
+            JSONObject newData = update.optJSONObject(fileName);
+            if (newData == null) continue;
+            List<String> allowed = Arrays.asList(schema).subList(1, schema.length);
+            try {
+                File file = new File(getFilesDir(), fileName);
+                JSONObject current = new JSONObject(readText(file));
+                int changed = 0;
+                java.util.Iterator<String> keys = newData.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    if (!allowed.contains(key)) continue; // ignore fields outside the schema
+                    Object incoming = newData.get(key);
+                    Object existing = current.opt(key);
+                    if (incoming instanceof JSONArray && existing instanceof JSONArray) {
+                        current.put(key, appendUnique((JSONArray) existing, (JSONArray) incoming));
+                    } else if (incoming instanceof JSONObject && existing instanceof JSONObject) {
+                        JSONObject merged = (JSONObject) existing;
+                        java.util.Iterator<String> sub = ((JSONObject) incoming).keys();
+                        while (sub.hasNext()) {
+                            String k = sub.next();
+                            merged.put(k, ((JSONObject) incoming).get(k));
+                        }
+                    } else {
+                        current.put(key, incoming);
+                    }
+                    changed++;
+                }
+                if (changed == 0) continue;
+                if (writeText(file, current.toString(2))) {
                     appendSystem("Updated " + fileName);
-                } catch (Exception ignored) {}
+                } else {
+                    appendSystem("Could not save " + fileName);
+                }
+            } catch (Exception exception) {
+                appendSystem("Memory update for " + fileName + " failed: " + exception.getMessage());
             }
         }
+    }
+
+    /** Appends entries not already present, keeping only the newest MAX_MEMORY_ARRAY_ITEMS. */
+    private JSONArray appendUnique(JSONArray existing, JSONArray incoming) {
+        ArrayList<Object> items = new ArrayList<>();
+        ArrayList<String> seen = new ArrayList<>();
+        for (JSONArray source : new JSONArray[]{existing, incoming}) {
+            for (int i = 0; i < source.length(); i++) {
+                Object item = source.opt(i);
+                String key = String.valueOf(item).trim().toLowerCase(Locale.US);
+                if (item == null || seen.contains(key)) continue;
+                seen.add(key);
+                items.add(item);
+            }
+        }
+        int from = Math.max(0, items.size() - MAX_MEMORY_ARRAY_ITEMS);
+        return new JSONArray(items.subList(from, items.size()));
     }
 
     private void appendTranscript(String speaker, String text) {
@@ -1287,8 +1735,26 @@ public class MainActivity extends Activity {
         
         TextView speakerView = new TextView(this);
         String speakerLabel = speaker;
-        if (speaker.contains("Supervisor") || speaker.contains("Analyst") || speaker.contains("Coach")) {
-            speakerLabel = "Coach";
+        if (speaker.contains("Supervisor")) {
+            speakerLabel = "👑 Coach (Supervisor)";
+        } else if (speaker.contains("Analyst")) {
+            speakerLabel = "🔍 Coach (Error Analyst)";
+        } else if (speaker.contains("Diagnostic")) {
+            speakerLabel = "🩺 Coach (Diagnostic)";
+        } else if ("Speaking Lab".equals(speaker)) {
+            speakerLabel = "🎙️ Speaking Lab";
+        } else if ("Writing Studio".equals(speaker)) {
+            speakerLabel = "📝 Writing Studio";
+        } else if ("Recall & Drill".equals(speaker)) {
+            speakerLabel = "🎯 Recall & Drill";
+        } else if ("Input Immersion".equals(speaker)) {
+            speakerLabel = "📖 Input Immersion";
+        } else if ("You".equals(speaker)) {
+            speakerLabel = "👤 You";
+        } else if ("System".equals(speaker)) {
+            speakerLabel = "🔔 System";
+        } else if (speaker.contains("Coach")) {
+            speakerLabel = "🎓 Coach";
         }
         speakerView.setText(speakerLabel.toUpperCase(Locale.US));
         speakerView.setTextSize(10);
@@ -1298,23 +1764,24 @@ public class MainActivity extends Activity {
         }
         
         if ("You".equals(speaker)) {
-            drawable.setColor(Color.rgb(240, 244, 255));
-            speakerView.setTextColor(Color.rgb(63, 81, 181));
+            drawable.setColor(Color.rgb(30, 41, 59)); // Slate background for user
+            drawable.setStroke(dp(1.5f), COLOR_ACCENT);
+            speakerView.setTextColor(COLOR_TEXT_PRIMARY);
         } else if ("System".equals(speaker)) {
             drawable.setColor(Color.TRANSPARENT);
-            speakerView.setTextColor(Color.rgb(113, 128, 150));
+            speakerView.setTextColor(COLOR_TEXT_SECONDARY);
             speakerView.setText("NOTIFICATION");
         } else if ("Input Immersion".equals(speaker)) {
-            drawable.setColor(Color.WHITE);
+            drawable.setColor(COLOR_BG_CARD);
             drawable.setStroke(dp(2), Color.rgb(34, 197, 94));
-            speakerView.setTextColor(Color.rgb(21, 128, 61));
+            speakerView.setTextColor(Color.rgb(34, 197, 94));
             speakerView.setText("📖 READING IMMERSION");
             speakerView.setGravity(Gravity.CENTER);
             card.setPadding(dp(24), dp(24), dp(24), dp(24));
         } else {
-            drawable.setColor(Color.WHITE);
-            drawable.setStroke(dp(1), Color.rgb(238, 242, 247));
-            speakerView.setTextColor(Color.rgb(45, 55, 72));
+            drawable.setColor(COLOR_BG_CARD);
+            drawable.setStroke(dp(1), COLOR_BORDER_CARD);
+            speakerView.setTextColor(COLOR_TEXT_SECONDARY);
         }
         
         card.setBackground(drawable);
@@ -1324,7 +1791,7 @@ public class MainActivity extends Activity {
         
         TextView contentView = new TextView(this);
         contentView.setText(text.trim());
-        contentView.setTextColor(Color.rgb(26, 32, 44));
+        contentView.setTextColor(COLOR_TEXT_PRIMARY);
         if ("Input Immersion".equals(speaker)) {
             contentView.setTextSize(20);
             contentView.setTypeface(Typeface.SERIF);
@@ -1369,7 +1836,7 @@ public class MainActivity extends Activity {
             speakerView.setGravity(Gravity.CENTER);
             contentView.setGravity(Gravity.CENTER);
             contentView.setTextSize(13);
-            contentView.setTextColor(Color.rgb(113, 128, 150));
+            contentView.setTextColor(COLOR_TEXT_SECONDARY);
             contentView.setTypeface(Typeface.create("sans-serif", Typeface.ITALIC));
         } else if ("Input Immersion".equals(speaker)) {
             params.setMargins(0, dp(8), 0, dp(24));
@@ -1396,8 +1863,58 @@ public class MainActivity extends Activity {
         if (progressBar != null) progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
     }
 
-    private void setStatus(String text) {
-        statusView.setText(text);
+    private void setStatus(final String text) {
+        if (statusView == null) return;
+        mainHandler.post(() -> {
+            if (text == null || text.trim().isEmpty()) {
+                statusView.setVisibility(View.GONE);
+                return;
+            }
+            statusView.setVisibility(View.VISIBLE);
+            String lowercase = text.toLowerCase(Locale.US);
+            
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(12));
+            
+            int textColor;
+            int paddingVertical = dp(10);
+            int paddingHorizontal = dp(16);
+            String prefix = "";
+            
+            if (lowercase.contains("connect") || lowercase.equals("ready.")) {
+                bg.setColor(Color.argb(40, 34, 197, 94)); // semi-transparent green
+                bg.setStroke(dp(1), Color.rgb(34, 197, 94));
+                textColor = Color.rgb(74, 222, 128); // light green
+                prefix = "✓ ";
+            } else if (lowercase.contains("fail") || lowercase.contains("error") || lowercase.contains("timeout") || lowercase.contains("invalid") || lowercase.contains("required")) {
+                bg.setColor(Color.argb(40, 239, 68, 68)); // semi-transparent red
+                bg.setStroke(dp(1), Color.rgb(239, 68, 68));
+                textColor = Color.rgb(248, 113, 113); // light red
+                prefix = "⚠️ ";
+            } else if (lowercase.contains("test") || lowercase.contains("contact") || lowercase.contains("process") || lowercase.contains("listen")) {
+                bg.setColor(Color.argb(40, 59, 130, 246)); // semi-transparent blue
+                bg.setStroke(dp(1), Color.rgb(59, 130, 246));
+                textColor = Color.rgb(96, 165, 250); // light blue
+                prefix = "⏳ ";
+            } else {
+                bg.setColor(Color.argb(40, 148, 163, 184)); // semi-transparent slate
+                bg.setStroke(dp(1), COLOR_BORDER_CARD);
+                textColor = COLOR_TEXT_SECONDARY;
+                prefix = "ℹ️ ";
+            }
+            
+            statusView.setBackground(bg);
+            statusView.setTextColor(textColor);
+            statusView.setText(prefix + text);
+            statusView.setPadding(paddingHorizontal, paddingVertical, paddingHorizontal, paddingVertical);
+            
+            android.view.ViewGroup.LayoutParams rawParams = statusView.getLayoutParams();
+            if (rawParams instanceof LinearLayout.LayoutParams) {
+                LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) rawParams;
+                params.setMargins(0, dp(16), 0, 0);
+                statusView.setLayoutParams(params);
+            }
+        });
     }
 
     private String serverUrl() {
@@ -1491,7 +2008,11 @@ public class MainActivity extends Activity {
 
     private String model() {
         String value = modelField.getText().toString().trim();
-        return value.isEmpty() ? DEFAULT_MODEL : value;
+        if (value.isEmpty()) {
+            boolean isGemini = (serviceTypeSpinner != null && serviceTypeSpinner.getSelectedItemPosition() == 1);
+            return isGemini ? "gemini-3.5-flash" : DEFAULT_MODEL;
+        }
+        return value;
     }
 
     private String trimSlash(String value) {
@@ -1559,7 +2080,10 @@ public class MainActivity extends Activity {
 
             String safeName = "session_log_" + timestamp.replace(":", "-").replace(".", "-") + ".json";
             File file = new File(getFilesDir(), safeName);
-            writeText(file, payload.toString(2));
+            if (!writeText(file, payload.toString(2))) {
+                appendSystem("Save failed: could not write " + file.getName());
+                return;
+            }
             appendSystem("Saved " + file.getName() + " in the app's local storage.");
         } catch (Exception exception) {
             appendSystem("Save failed: " + exception.getMessage());
@@ -1594,11 +2118,14 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void writeText(File file, String content) {
+    /** Writes the file; returns false (instead of throwing) so callers can report the failure. */
+    private boolean writeText(File file, String content) {
         try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(
                 java.nio.file.Files.newOutputStream(file.toPath()), StandardCharsets.UTF_8))) {
             writer.write(content);
-        } catch (Exception ignored) {
+            return true;
+        } catch (Exception exception) {
+            return false;
         }
     }
 
@@ -1634,11 +2161,14 @@ public class MainActivity extends Activity {
         if (largeMicButton != null) {
             if (text.contains("Stop")) {
                 largeMicButton.setText("🛑 Stop Recording");
-                largeMicButton.setBackgroundColor(Color.rgb(44, 62, 80));
+                GradientDrawable activeDrawable = new GradientDrawable();
+                activeDrawable.setColor(Color.rgb(44, 62, 80));
+                activeDrawable.setCornerRadius(dp(16));
+                largeMicButton.setBackground(activeDrawable);
             } else {
                 largeMicButton.setText("🎤 Tap to Speak");
                 GradientDrawable largeMicDrawable = new GradientDrawable();
-                largeMicDrawable.setColor(Color.rgb(231, 76, 60));
+                largeMicDrawable.setColor(Color.rgb(239, 68, 68));
                 largeMicDrawable.setCornerRadius(dp(16));
                 largeMicButton.setBackground(largeMicDrawable);
             }
@@ -1691,6 +2221,10 @@ public class MainActivity extends Activity {
     }
 
     private String getEffectiveFocusArea() {
+        String step = currentStep();
+        List<String> focusModes = Arrays.asList("Speaking Lab", "Writing Studio", "Input Immersion", "Diagnostic Coach");
+        if (focusModes.contains(step)) return step;
+        
         if (focusSpinner == null) return roleForToday();
         Object selected = focusSpinner.getSelectedItem();
         String selectedStr = (selected != null) ? String.valueOf(selected) : "Auto";
@@ -1708,15 +2242,17 @@ public class MainActivity extends Activity {
             TextView labelView = (TextView) card.getChildAt(1);
             
             if (i == selectedIndex) {
-                drawable.setColor(Color.rgb(232, 240, 254));
-                drawable.setStroke(dp(2), Color.rgb(63, 81, 181));
+                drawable.setColor(COLOR_ACCENT);
+                drawable.setStroke(dp(2), Color.WHITE);
+                iconView.setTextColor(Color.WHITE);
                 iconView.setAlpha(1.0f);
-                labelView.setTextColor(Color.rgb(63, 81, 181));
+                labelView.setTextColor(Color.WHITE);
             } else {
-                drawable.setColor(Color.WHITE);
-                drawable.setStroke(dp(1), Color.rgb(226, 232, 240));
-                iconView.setAlpha(0.5f);
-                labelView.setTextColor(Color.rgb(100, 116, 139));
+                drawable.setColor(COLOR_BG_CARD);
+                drawable.setStroke(dp(1), COLOR_BORDER_CARD);
+                iconView.setTextColor(COLOR_TEXT_PRIMARY);
+                iconView.setAlpha(0.4f);
+                labelView.setTextColor(COLOR_TEXT_SECONDARY);
             }
             card.setBackground(drawable);
         }
