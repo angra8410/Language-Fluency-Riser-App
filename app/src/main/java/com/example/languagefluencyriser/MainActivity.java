@@ -436,6 +436,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        setTheme(R.style.AppTheme); // leave the launch theme (logo background) behind
         super.onCreate(savedInstanceState);
         ensureMemoryFiles();
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
@@ -447,6 +448,92 @@ public class MainActivity extends Activity {
         loadPrefs();
         initTts();
         refreshToday();
+        if (savedInstanceState == null) showIntro();
+    }
+
+    // =======================================================================================
+    // Opening intro: picks up from the system splash, the bars rise, the name fades in
+    // =======================================================================================
+
+    private static final int INTRO_LOGO_DP = 160; // same size as the Android 12+ splash icon
+
+    private void showIntro() {
+        final FrameLayout root = (FrameLayout) findViewById(android.R.id.content);
+        if (root == null) return;
+        // Remove the system splash at once: the intro draws the same logo in the same place.
+        if (Build.VERSION.SDK_INT >= 31) {
+            getSplashScreen().setOnExitAnimationListener(view -> view.remove());
+        }
+
+        final FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(COLOR_BG_ROOT);
+        overlay.setClickable(true); // block touches to the app underneath while it plays
+        overlay.setContentDescription(getString(R.string.app_name));
+
+        final LogoMarkView logo = new LogoMarkView(this);
+        overlay.addView(logo, new FrameLayout.LayoutParams(dp(INTRO_LOGO_DP), dp(INTRO_LOGO_DP), Gravity.CENTER));
+
+        final LinearLayout words = new LinearLayout(this);
+        words.setOrientation(LinearLayout.VERTICAL);
+        words.setGravity(Gravity.CENTER_HORIZONTAL);
+        TextView name = text(getString(R.string.app_name), 26, COLOR_TEXT_PRIMARY, true);
+        name.setTypeface(font(FONT_DISPLAY));
+        name.setGravity(Gravity.CENTER);
+        words.addView(name);
+        TextView tagline = text("Speak a little better every day", 15, COLOR_TEXT_SECONDARY, false);
+        tagline.setGravity(Gravity.CENTER);
+        tagline.setPadding(0, dp(6), 0, 0);
+        words.addView(tagline);
+        FrameLayout.LayoutParams wordsParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        wordsParams.topMargin = dp(68);
+        overlay.addView(words, wordsParams);
+        words.setAlpha(0f);
+
+        root.addView(overlay, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        // One timeline drives everything, so "remove animations" in system settings skips it.
+        final long total = 1500;
+        final android.animation.ValueAnimator timeline = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        timeline.setDuration(total);
+        timeline.setInterpolator(new android.view.animation.LinearInterpolator());
+        final android.view.animation.Interpolator ease = new android.view.animation.DecelerateInterpolator(2f);
+        final android.view.animation.Interpolator overshoot = new android.view.animation.OvershootInterpolator(2.2f);
+        timeline.addUpdateListener(a -> {
+            float ms = a.getAnimatedFraction() * total;
+            // Logo: shrink from splash size and move up to make room for the name (0-550 ms)
+            float move = ease.getInterpolation(clamp01(ms / 550f));
+            float s = 1f - 0.3f * move;
+            logo.setScaleX(s);
+            logo.setScaleY(s);
+            logo.setTranslationY(-dp(44) * move);
+            // Bars: dip, then rise one after another (80-900 ms)
+            for (int i = 0; i < 3; i++) {
+                float start = 80 + i * 130;
+                float dip = clamp01((ms - start) / 160f);
+                float rise = clamp01((ms - start - 160) / 420f);
+                float p = rise > 0 ? overshoot.getInterpolation(rise) : 1f - dip;
+                logo.setBarProgress(i, p);
+            }
+            // Name and tagline: fade and slide in (350-850 ms)
+            float w = ease.getInterpolation(clamp01((ms - 350) / 500f));
+            words.setAlpha(w);
+            words.setTranslationY(dp(16) * (1f - w));
+            // Whole intro fades out to reveal the app (1200-1500 ms)
+            overlay.setAlpha(1f - clamp01((ms - 1200) / 300f));
+        });
+        timeline.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
+                root.removeView(overlay);
+            }
+        });
+        overlay.setOnClickListener(v -> timeline.end()); // tap to skip
+        timeline.start();
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
     }
 
     private void initTts() {
