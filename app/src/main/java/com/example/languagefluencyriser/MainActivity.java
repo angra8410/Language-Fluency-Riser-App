@@ -144,6 +144,7 @@ public class MainActivity extends Activity {
     private SpeechRecognizer speechRecognizer;
     private TextToSpeech tts;
     private boolean isListening = false;
+    private String lastPartial = ""; // last live words heard, used if the final result comes back empty
     private boolean voiceMode = false;
     private static final String PREF_VOICE_MODE = "voice_mode";
     private static final String PREF_FOCUS = "focus_area";
@@ -1238,7 +1239,15 @@ public class MainActivity extends Activity {
         updateComposerHint();
         if (value && voiceOverlay != null && voiceOverlay.getVisibility() == View.VISIBLE) {
             setVoiceState(VOICE_THINKING, null);
+        } else if (!value && voiceState == VOICE_THINKING) {
+            setVoiceState(VOICE_IDLE, null); // the request finished; never stay on "thinking"
         }
+    }
+
+    /** Shows an error on the voice screen, where the hidden chat can't show it. */
+    private void showVoiceError(String message) {
+        if (voiceOverlay == null || voiceOverlay.getVisibility() != View.VISIBLE) return;
+        setVoiceState(VOICE_IDLE, message + "\nTap Speak to try again.");
     }
 
     private void setActionEnabled(View view, boolean enabled) {
@@ -1991,6 +2000,12 @@ public class MainActivity extends Activity {
             @Override public void onError(int error) {
                 isListening = false;
                 updateMicUi();
+                // Many recognizers show live words, then end with "no match" (or a client error
+                // after stopListening). Keep what was already heard instead of discarding it.
+                if (!lastPartial.isEmpty()) {
+                    handleHeard(lastPartial);
+                    return;
+                }
                 boolean noSpeech = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
                 String message = noSpeech ? "Didn't catch that. Tap Speak to try again." : "Microphone error (" + error + "). Tap Speak to try again.";
                 if (speechTarget == SPEECH_REVIEW) {
@@ -2008,24 +2023,16 @@ public class MainActivity extends Activity {
                 isListening = false;
                 updateMicUi();
                 ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                String heard = (matches != null && !matches.isEmpty()) ? matches.get(0).trim() : "";
-                if (speechTarget == SPEECH_REVIEW) {
-                    if (!heard.isEmpty()) onReviewHeard(heard);
-                    else renderReview();
-                    return;
-                }
-                if (!heard.isEmpty()) userInput.setText(heard);
-                if (voiceMode && sessionActive && !heard.isEmpty()) {
-                    sendCurrentInput(); // hands-free: send as soon as the learner stops talking
-                } else {
-                    setVoiceState(VOICE_IDLE, heard.isEmpty() ? "Didn't catch that. Tap Speak to try again." : null);
-                    updateComposerHint();
-                }
+                String heard = (matches != null && !matches.isEmpty() && matches.get(0) != null) ? matches.get(0).trim() : "";
+                // Some recognizers return an empty final result after showing partial words.
+                if (heard.isEmpty()) heard = lastPartial;
+                handleHeard(heard);
             }
             @Override public void onPartialResults(Bundle partialResults) {
                 ArrayList<String> partial = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                if (partial == null || partial.isEmpty() || partial.get(0).trim().isEmpty()) return;
+                if (partial == null || partial.isEmpty() || partial.get(0) == null || partial.get(0).trim().isEmpty()) return;
                 String words = partial.get(0);
+                lastPartial = words.trim();
                 if (speechTarget == SPEECH_REVIEW) {
                     if (reviewLiveView != null) {
                         reviewLiveView.setText("You said: \"" + words + "\"");
@@ -2038,6 +2045,23 @@ public class MainActivity extends Activity {
             }
             @Override public void onEvent(int eventType, Bundle params) {}
         });
+    }
+
+    /** Handles a finished recognition: sends it in hands-free mode, or leaves it in the box. */
+    private void handleHeard(String heard) {
+        lastPartial = "";
+        if (speechTarget == SPEECH_REVIEW) {
+            if (!heard.isEmpty()) onReviewHeard(heard);
+            else renderReview();
+            return;
+        }
+        if (!heard.isEmpty()) userInput.setText(heard);
+        if (voiceMode && sessionActive && !heard.isEmpty()) {
+            sendCurrentInput(); // hands-free: send as soon as the learner stops talking
+        } else {
+            setVoiceState(VOICE_IDLE, heard.isEmpty() ? "Didn't catch that. Tap Speak to try again." : null);
+            updateComposerHint();
+        }
     }
 
     private void toggleMic(int target) {
@@ -2078,6 +2102,7 @@ public class MainActivity extends Activity {
             userInput.setText("");
             voiceLiveView.setText("");
         }
+        lastPartial = "";
         isListening = true;
         speechRecognizer.startListening(intent);
         updateMicUi();
@@ -2094,6 +2119,7 @@ public class MainActivity extends Activity {
     /** Stops listening and discards what was heard. */
     private void cancelListening() {
         isListening = false;
+        lastPartial = "";
         if (speechRecognizer != null) speechRecognizer.cancel();
         updateMicUi();
     }
@@ -2608,6 +2634,7 @@ public class MainActivity extends Activity {
             if (setupIssue != null) {
                 appendSystem(setupIssue);
                 setStatus("Update the Ollama server URL for this device.");
+                showVoiceError(setupIssue);
                 return;
             }
         }
@@ -2637,6 +2664,8 @@ public class MainActivity extends Activity {
                         ? postGemini(systemPrompt, messages, geminiTokens, jsonMode)
                         : postChat(systemPrompt, messages, ollamaTokens, jsonMode);
                 mainHandler.post(() -> {
+                  String shown;
+                  try {
                     conversation.add(userTurn);
                     try {
                         conversation.add(new JSONObject().put("role", "assistant").put("content", response));
@@ -2644,7 +2673,6 @@ public class MainActivity extends Activity {
                         // JSONObject.put only throws for null keys / non-finite numbers.
                     }
                     JSONObject structured = jsonMode ? parseCoachJson(response) : null;
-                    String shown;
                     if (structured != null) {
                         shown = appendAssistant(step, structured.optString("message", "").trim());
                         JSONArray corrections = structured.optJSONArray("corrections");
@@ -2659,6 +2687,13 @@ public class MainActivity extends Activity {
                     } else {
                         shown = appendAssistant(step, response); // plain-text step, or the model ignored the JSON format
                     }
+                  } catch (Exception displayError) {
+                    // Never leave the screen stuck on "thinking" if showing the reply fails
+                    setBusy(false);
+                    appendSystem("Error showing the coach's reply: " + displayError.getMessage());
+                    showVoiceError("Couldn't show the coach's reply.");
+                    return;
+                  }
                     setStatus("Ready.");
                     setBusy(false);
                     if (voiceMode && sessionActive && !sessionReadOnly) {
@@ -2667,21 +2702,77 @@ public class MainActivity extends Activity {
                 });
             } catch (Exception exception) {
                 mainHandler.post(() -> {
-                    appendSystem("Error: " + (isGemini ? exception.getMessage() : ollamaConnectionErrorMessage(exception)));
+                    String error = isGemini ? exception.getMessage() : ollamaConnectionErrorMessage(exception);
+                    appendSystem("Error: " + error);
                     setStatus(isGemini ? "Check API key and network." : ollamaConnectionStatusMessage());
                     setBusy(false);
+                    showVoiceError("Couldn't reach the coach: " + error);
                 });
             }
         });
     }
 
+    /** Backup model used when the chosen one is overloaded. */
+    private static final String GEMINI_FALLBACK_MODEL = "gemini-2.5-flash";
+
+    /** An HTTP error from Gemini, keeping the status code so we can decide whether to retry. */
+    private static class GeminiHttpException extends IllegalStateException {
+        final int code;
+        GeminiHttpException(int code, String message) {
+            super(message);
+            this.code = code;
+        }
+    }
+
+    /**
+     * Calls Gemini, retrying when Google is temporarily overloaded (500/503/504) and
+     * falling back to a second model if the chosen one stays busy or hits its rate limit (429).
+     * Runs on the background thread.
+     */
     private String postGemini(String systemPrompt, List<JSONObject> history, int maxTokens, boolean jsonMode) throws Exception {
+        String chosen = model();
+        List<String> models = new ArrayList<>();
+        models.add(chosen);
+        if (!GEMINI_FALLBACK_MODEL.equals(chosen)) models.add(GEMINI_FALLBACK_MODEL);
+
+        final long[] waitsMillis = {1500, 3000};
+        GeminiHttpException last = null;
+        for (String modelName : models) {
+            for (int attempt = 0; attempt <= waitsMillis.length; attempt++) {
+                try {
+                    return postGeminiOnce(modelName, systemPrompt, history, maxTokens, jsonMode);
+                } catch (GeminiHttpException e) {
+                    last = e;
+                    boolean overloaded = e.code == 500 || e.code == 503 || e.code == 504;
+                    if (e.code == 429) break; // rate limit: retrying the same model won't help soon
+                    if (!overloaded) throw e; // bad key, bad model name, etc.
+                    if (attempt == waitsMillis.length) break;
+                    final String note = "Google is busy, retrying…";
+                    mainHandler.post(() -> {
+                        setStatus(note);
+                        if (voiceState == VOICE_THINKING) setVoiceState(VOICE_THINKING, note);
+                    });
+                    Thread.sleep(waitsMillis[attempt]);
+                }
+            }
+            if (models.indexOf(modelName) < models.size() - 1) {
+                final String note = "Still busy, trying a backup model…";
+                mainHandler.post(() -> {
+                    setStatus(note);
+                    if (voiceState == VOICE_THINKING) setVoiceState(VOICE_THINKING, note);
+                });
+            }
+        }
+        throw last;
+    }
+
+    private String postGeminiOnce(String modelName, String systemPrompt, List<JSONObject> history, int maxTokens, boolean jsonMode) throws Exception {
         String key = apiKeyField.getText().toString().trim();
         if (key.isEmpty()) {
             throw new IllegalArgumentException("Gemini API Key is empty. Please set it in Settings.");
         }
 
-        URL url = new URL(GEMINI_BASE_URL + model() + ":generateContent");
+        URL url = new URL(GEMINI_BASE_URL + modelName + ":generateContent");
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("POST");
         connection.setConnectTimeout(15000);
@@ -2726,7 +2817,15 @@ public class MainActivity extends Activity {
                 : connection.getErrorStream();
         String body = readStream(input);
         if (code < 200 || code >= 300) {
-            throw new IllegalStateException("HTTP " + code + ": " + body);
+            // Show Google's short explanation (bad key, quota, unknown model) instead of raw JSON
+            String reason = body;
+            try {
+                JSONObject err = new JSONObject(body).optJSONObject("error");
+                if (err != null && !err.optString("message").isEmpty()) reason = err.optString("message");
+            } catch (Exception ignored) {
+                // body wasn't JSON; keep it as-is
+            }
+            throw new GeminiHttpException(code, "Gemini HTTP " + code + ": " + reason);
         }
 
         JSONObject json = new JSONObject(body);
@@ -2736,12 +2835,28 @@ public class MainActivity extends Activity {
             JSONObject content = candidate.optJSONObject("content");
             if (content != null) {
                 JSONArray resParts = content.optJSONArray("parts");
-                if (resParts != null && resParts.length() > 0) {
-                    return resParts.getJSONObject(0).optString("text", body);
+                if (resParts != null) {
+                    // Newer models can return several parts (including hidden "thought" parts);
+                    // join the visible text ones.
+                    StringBuilder text = new StringBuilder();
+                    for (int i = 0; i < resParts.length(); i++) {
+                        JSONObject part = resParts.optJSONObject(i);
+                        if (part == null || part.optBoolean("thought", false)) continue;
+                        text.append(part.optString("text", ""));
+                    }
+                    if (text.length() > 0) return text.toString();
                 }
             }
+            String finish = candidate.optString("finishReason", "");
+            if (!finish.isEmpty() && !"STOP".equals(finish)) {
+                throw new IllegalStateException("Gemini returned no text (" + finish + ").");
+            }
         }
-        return body;
+        JSONObject feedback = json.optJSONObject("promptFeedback");
+        if (feedback != null && !feedback.optString("blockReason").isEmpty()) {
+            throw new IllegalStateException("Gemini blocked the request (" + feedback.optString("blockReason") + ").");
+        }
+        throw new IllegalStateException("Gemini returned an empty reply.");
     }
 
     private String postChat(String systemPrompt, List<JSONObject> history, int maxTokens, boolean jsonMode) throws Exception {
