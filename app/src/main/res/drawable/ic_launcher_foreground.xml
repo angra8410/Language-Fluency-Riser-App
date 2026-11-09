@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Speech bubble with three rising bars: "speak, and rise". Kept inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Soft shadow under the bubble -->
+    <path
+        android:fillColor="#33201A6B"
+        android:pathData="M42,34.5H66A12,12 0,0 1,78 46.5V60.5A12,12 0,0 1,66 72.5H50L40,80.5V72.5H42A12,12 0,0 1,30 60.5V46.5A12,12 0,0 1,42 34.5Z" />
+    <!-- Bubble -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M42,32H66A12,12 0,0 1,78 44V58A12,12 0,0 1,66 70H50L40,78V70H42A12,12 0,0 1,30 58V44A12,12 0,0 1,42 32Z" />
+    <!-- Rising bars -->
+    <path
+        android:fillColor="#FFA5B4FC"
+        android:pathData="M43,53A3,3 0,0 1,46 56V59A3,3 0,0 1,43 62A3,3 0,0 1,40 59V56A3,3 0,0 1,43 53Z" />
+    <path
+        android:fillColor="#FF6366F1"
+        android:pathData="M54,47A3,3 0,0 1,57 50V59A3,3 0,0 1,54 62A3,3 0,0 1,51 59V50A3,3 0,0 1,54 47Z" />
+    <path
+        android:fillColor="#FFFBBF24"
+        android:pathData="M65,40A3,3 0,0 1,68 43V59A3,3 0,0 1,65 62A3,3 0,0 1,62 59V43A3,3 0,0 1,65 40Z" />
+</vector>
